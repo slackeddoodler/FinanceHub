@@ -60,17 +60,27 @@ export default function LedgerPage() {
     return undefined;
   });
 
+  const [activeFilterType, setActiveFilterType] = useState<"date" | "lastDateOfPayment">(() => {
+    if (typeof window !== "undefined") {
+      const saved = sessionStorage.getItem("financehub_date_filters");
+      if (saved) { try { const p = JSON.parse(saved); if (p.filterType) return p.filterType; } catch(e){} }
+    }
+    return "date";
+  });
+
   const [inputStart, setInputStart] = useState<Date | undefined>(activeStart);
   const [inputEnd, setInputEnd] = useState<Date | undefined>(activeEnd);
+  const [inputFilterType, setInputFilterType] = useState<"date" | "lastDateOfPayment">(activeFilterType);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
       sessionStorage.setItem("financehub_date_filters", JSON.stringify({
         startDate: activeStart ? activeStart.toISOString() : null,
-        endDate: activeEnd ? activeEnd.toISOString() : null
+        endDate: activeEnd ? activeEnd.toISOString() : null,
+        filterType: activeFilterType
       }));
     }
-  }, [activeStart, activeEnd]);
+  }, [activeStart, activeEnd, activeFilterType]);
 
   useEffect(() => {
     if (isFilterOpen && typeof window !== "undefined") {
@@ -80,9 +90,12 @@ export default function LedgerPage() {
           const p = JSON.parse(saved);
           setInputStart(p.startDate ? new Date(p.startDate) : undefined);
           setInputEnd(p.endDate ? new Date(p.endDate) : undefined);
+          setInputFilterType(p.filterType || "date");
         } catch(e) {}
       } else {
-        setInputStart(undefined); setInputEnd(undefined);
+        setInputStart(undefined); 
+        setInputEnd(undefined);
+        setInputFilterType("date");
       }
     }
   }, [isFilterOpen]);
@@ -118,16 +131,24 @@ export default function LedgerPage() {
   const filteredData = useMemo(() => {
     return data.filter(item => {
       let matchesCat = activeCats.length === 0 || activeCats.includes(item.categoryId);
-      let matchesStart = !activeStart || item.date >= activeStart;
+      
+      const targetDate = item[activeFilterType];
+
+      let matchesStart = true;
+      if (activeStart) {
+        matchesStart = targetDate ? targetDate >= activeStart : false;
+      }
+
       let matchesEnd = true;
       if (activeEnd) {
         const e = new Date(activeEnd);
         e.setHours(23, 59, 59, 999);
-        matchesEnd = item.date <= e;
+        matchesEnd = targetDate ? targetDate <= e : false;
       }
+      
       return matchesCat && matchesStart && matchesEnd;
     });
-  }, [data, activeCats, activeStart, activeEnd]);
+  }, [data, activeCats, activeStart, activeEnd, activeFilterType]);
 
   const groupedCategories = useMemo(() => {
     const visibleCats = activeCats.length === 0 ? categories : categories.filter(c => activeCats.includes(c.id));
@@ -181,6 +202,7 @@ export default function LedgerPage() {
   const handleApplyDates = () => {
     if (inputStart) { const s = new Date(inputStart); s.setHours(0,0,0,0); setActiveStart(s); } else setActiveStart(undefined);
     if (inputEnd) { const e = new Date(inputEnd); e.setHours(23,59,59,999); setActiveEnd(e); } else setActiveEnd(undefined);
+    setActiveFilterType(inputFilterType);
     setIsFilterOpen(false); 
   };
   
@@ -293,7 +315,18 @@ export default function LedgerPage() {
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-80 space-y-4" align="end">
-              <h4 className="font-semibold text-sm leading-none">Filter by Date</h4>
+              <div className="flex items-center justify-between">
+                <h4 className="font-semibold text-sm leading-none">Filter by Date</h4>
+                <Select value={inputFilterType} onValueChange={(val: "date" | "lastDateOfPayment") => setInputFilterType(val)}>
+                  <SelectTrigger className="h-7 w-[130px] text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="date" className="text-xs">Payment Date</SelectItem>
+                    <SelectItem value="lastDateOfPayment" className="text-xs">Due Date</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-2 flex flex-col">
                   <Label className="text-xs mb-1">Start Date</Label>
