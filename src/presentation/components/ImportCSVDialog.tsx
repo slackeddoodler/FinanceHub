@@ -1,174 +1,189 @@
 "use client";
 
 import { useState, useRef } from "react";
-import Papa from "papaparse";
 import { useAppStore } from "../store/AppProvider";
-import { SpendItem } from "../../domain/entities/SpendItem";
 import { Category } from "../../domain/entities/Category";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
+import { SpendItem } from "../../domain/entities/SpendItem";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { UploadCloud, CheckCircle2, AlertCircle } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
+import { Upload, AlertCircle, FileUp, CheckCircle2 } from "lucide-react";
+
+// Robust native CSV parser to handle commas inside quotes safely without 3rd party libraries
+function parseCSV(text: string): string[][] {
+  const rows: string[][] = [];
+  let currentRow: string[] = [];
+  let currentCell = '';
+  let insideQuotes = false;
+  
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    const nextChar = text[i + 1];
+    
+    if (char === '"' && insideQuotes && nextChar === '"') {
+      currentCell += '"';
+      i++; // Skip escaped quote
+    } else if (char === '"') {
+      insideQuotes = !insideQuotes;
+    } else if (char === ',' && !insideQuotes) {
+      currentRow.push(currentCell.trim());
+      currentCell = '';
+    } else if (char === '\n' && !insideQuotes) {
+      currentRow.push(currentCell.trim());
+      rows.push(currentRow);
+      currentRow = [];
+      currentCell = '';
+    } else if (char !== '\r') {
+      currentCell += char;
+    }
+  }
+  if (currentRow.length || currentCell) {
+    currentRow.push(currentCell.trim());
+    rows.push(currentRow);
+  }
+  return rows.filter(r => r.some(cell => cell !== "")); // Remove pure empty rows
+}
 
 export function ImportCSVDialog({ onImported }: { onImported: () => void }) {
-  const { spendRepo, categoryRepo } = useAppStore();
-  const [open, setOpen] = useState(false);
+  const { categoryRepo, spendRepo } = useAppStore();
+  const [isOpen, setIsOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [status, setStatus] = useState<{ type: 'idle' | 'success' | 'error', message: string }>({ type: 'idle', message: '' });
-  
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const parseDate = (dateStr: string | undefined) => {
-    if (!dateStr || String(dateStr).trim() === "Not Set") return null;
-    const parts = String(dateStr).split('/');
-    if (parts.length === 3) {
-      return new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]), 12, 0, 0, 0);
-    }
-    const fallback = new Date(dateStr);
-    fallback.setHours(12, 0, 0, 0);
-    return isNaN(fallback.getTime()) ? null : fallback;
-  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !spendRepo || !categoryRepo) return;
+    if (!file || !categoryRepo || !spendRepo) return;
 
     setIsProcessing(true);
-    setStatus({ type: 'idle', message: 'Reading file...' });
+    setError(null);
+    setSuccess(null);
 
-    try {
-      const text = await file.text();
-      
-      let csvDataToParse = text;
-      
-      // CRITICAL FIX: Mathematically slice the string starting at the exact header sequence.
-      // This perfectly ignores all legacy summary text, empty lines, and excel commas.
-      const newHeaderStart = text.indexOf("Date of Payment,Category,Item Name");
-      const oldHeaderStart = text.indexOf("Date,Category,Item Name");
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const text = event.target?.result as string;
+        const parsed = parseCSV(text);
+        
+        if (parsed.length < 2) throw new Error("CSV file is empty or missing headers.");
 
-      if (newHeaderStart !== -1) {
-        csvDataToParse = text.substring(newHeaderStart);
-      } else if (oldHeaderStart !== -1) {
-        csvDataToParse = text.substring(oldHeaderStart);
-      }
+        const headers = parsed[0].map(h => h.toLowerCase());
+        
+        // Flexible dynamic indexing to prevent breakage if CSV columns shift
+        const catIdx = headers.findIndex(h => h.includes("category name") || h === "category");
+        const budgetIdx = headers.findIndex(h => h.includes("budget"));
+        const itemIdx = headers.findIndex(h => h.includes("item name") || h === "item");
+        const descIdx = headers.findIndex(h => h.includes("description"));
+        const totalIdx = headers.findIndex(h => h.includes("total amount") || h.includes("total"));
+        const paidIdx = headers.findIndex(h => h.includes("amount paid") || h.includes("paid"));
+        const dateIdx = headers.findIndex(h => h === "date" || h.includes("payment date"));
+        const lastDateIdx = headers.findIndex(h => h.includes("last date"));
 
-      Papa.parse(csvDataToParse.trim(), {
-        header: true,
-        skipEmptyLines: true,
-        complete: async (results) => {
-          try {
-            const rows = results.data as any[];
-            if (rows.length === 0) throw new Error("No valid transactions found.");
+        if (catIdx === -1) throw new Error("Missing required column: Category Name");
 
-            const existingCategories = await categoryRepo.findAll();
-            let importCount = 0;
+        const existingCategories = await categoryRepo.findAll();
+        let newTransactionsCount = 0;
 
-            for (const row of rows) {
-              const rawDate = row["Date of Payment"] || row["Date"];
-              
-              if (!rawDate || !row["Item Name"] || !row["Total Amount"]) continue;
+        for (let i = 1; i < parsed.length; i++) {
+          const row = parsed[i];
+          const catName = row[catIdx];
+          if (!catName) continue; // Skip entirely blank rows
+          
+          const rawBudget = budgetIdx !== -1 ? Number(row[budgetIdx]) : 0;
+          const budget = isNaN(rawBudget) ? 0 : rawBudget;
 
-              const categoryName = row["Category"] || "Uncategorized";
-              
-              let cat = existingCategories.find(c => c.name.toLowerCase() === categoryName.toLowerCase());
-              if (!cat) {
-                cat = new Category(crypto.randomUUID(), categoryName, 0, new Date());
-                await categoryRepo.save(cat);
-                existingCategories.push(cat); 
-              }
-
-              const parsedDate = parseDate(rawDate);
-              if (!parsedDate) continue;
-
-              const parsedDueDate = parseDate(row["Due Date"]);
-              const totalAmount = Number(String(row["Total Amount"]).replace(/[^0-9.-]+/g,"")) || 0;
-              const amountPaid = Number(String(row["Amount Paid"] || "0").replace(/[^0-9.-]+/g,"")) || 0;
-
-              const newItem = new SpendItem(
-                crypto.randomUUID(),
-                cat.id,
-                row["Item Name"],
-                null,
-                totalAmount,
-                amountPaid,
-                parsedDate,
-                null,
-                parsedDueDate
+          // 1. Process the Category & Budget Restoration
+          // 1. Process the Category & Budget Restoration
+          let targetCatId = "";
+          const existingCatIndex = existingCategories.findIndex(c => c.name.toLowerCase() === catName.toLowerCase());
+          const existingCat = existingCategories[existingCatIndex];
+          
+          if (existingCat) {
+            targetCatId = existingCat.id;
+            // Backup restoration: Update existing budget if the CSV dictates a new one
+            if (budgetIdx !== -1 && existingCat.allocatedBudget !== budget) {
+              await categoryRepo.updateBudget(targetCatId, budget);
+              // CRITICAL FIX: Respect readonly immutability by replacing the object instance entirely
+              existingCategories[existingCatIndex] = new Category(
+                existingCat.id,
+                existingCat.name,
+                budget,
+                existingCat.createdAt
               );
-
-              await spendRepo.save(newItem);
-              importCount++;
             }
-
-            if (importCount === 0) {
-                throw new Error("Columns mismatched or rows empty. Check CSV format.");
-            }
-
-            setStatus({ type: 'success', message: `Successfully imported ${importCount} transactions.` });
-            onImported();
-            
-            setTimeout(() => { setOpen(false); setStatus({ type: 'idle', message: '' }); }, 2000);
-
-          } catch (err: any) {
-            setStatus({ type: 'error', message: err.message || "Failed to process database records." });
+          } else {
+            targetCatId = crypto.randomUUID();
+            const newCat = new Category(targetCatId, catName, budget, new Date());
+            await categoryRepo.save(newCat);
+            existingCategories.push(newCat); // Sync local memory array
           }
-        },
-        error: (err: any) => {
-          setStatus({ type: 'error', message: `CSV Parser Error: ${err.message}` });
+
+          // 2. Process the Transaction (If the row isn't just an empty category backup)
+          const itemName = itemIdx !== -1 ? row[itemIdx] : "";
+          if (itemName) {
+            const desc = descIdx !== -1 ? row[descIdx] : null;
+            const total = totalIdx !== -1 ? Number(row[totalIdx]) || 0 : 0;
+            const paid = paidIdx !== -1 ? Number(row[paidIdx]) || 0 : 0;
+            
+            const dateStr = dateIdx !== -1 ? row[dateIdx] : "";
+            const date = dateStr ? new Date(dateStr) : new Date();
+            
+            const lastDateStr = lastDateIdx !== -1 ? row[lastDateIdx] : "";
+            const lastDate = lastDateStr ? new Date(lastDateStr) : null;
+
+            const newSpend = new SpendItem(
+              crypto.randomUUID(), targetCatId, itemName, desc, total, paid, date, null, lastDate
+            );
+            await spendRepo.save(newSpend);
+            newTransactionsCount++;
+          }
         }
-      });
-    } catch (err) {
-      setStatus({ type: 'error', message: "Failed to read the file. Ensure it is a valid CSV." });
-    } finally {
-      setIsProcessing(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
+
+        setSuccess(`Successfully synchronized categories and imported ${newTransactionsCount} transactions.`);
+        onImported();
+        setTimeout(() => setIsOpen(false), 2000);
+      } catch (err: any) {
+        setError(err.message || "Failed to parse CSV file.");
+      } finally {
+        setIsProcessing(false);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+    };
+    reader.readAsText(file);
   };
 
   return (
-    <Dialog open={open} onOpenChange={(val) => { setOpen(val); if (!val) setStatus({ type: 'idle', message: '' }); }}>
+    <Dialog open={isOpen} onOpenChange={(open) => { setIsOpen(open); if(!open) { setError(null); setSuccess(null); } }}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="h-9">
-          <UploadCloud className="h-4 w-4 mr-2" />
+        <Button variant="outline" size="sm" className="flex items-center space-x-2 h-9 bg-background">
+          <Upload className="h-4 w-4" />
           <span>Import CSV</span>
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[400px]">
+      <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>Import Transactions</DialogTitle>
+          <DialogTitle>Import Data Backup</DialogTitle>
           <DialogDescription>
-            Upload a previously exported FinanceHub CSV to restore your ledger.
+            Upload a CSV file to restore categories, budgets, and transactions.
           </DialogDescription>
         </DialogHeader>
-
-        <div className="space-y-4 pt-4">
-          <div className="border-2 border-dashed rounded-lg p-6 flex flex-col items-center justify-center text-center space-y-3 bg-muted/20 hover:bg-muted/40 transition-colors relative">
-            <UploadCloud className="h-8 w-8 text-muted-foreground" />
-            <div className="space-y-1">
-              <p className="text-sm font-medium">Click to select a CSV file</p>
-              <p className="text-xs text-muted-foreground">Formats accepted: .csv</p>
-            </div>
-            <Input 
-              ref={fileInputRef}
-              type="file" 
-              accept=".csv" 
-              onChange={handleFileUpload}
-              disabled={isProcessing}
-              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-            />
+        
+        <div className="grid gap-4 py-4">
+          <div className="flex flex-col items-center justify-center border-2 border-dashed border-muted-foreground/25 rounded-lg p-8 hover:bg-muted/50 transition-colors cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+            <FileUp className="h-8 w-8 text-muted-foreground mb-3" />
+            <span className="text-sm font-medium">{isProcessing ? "Processing File..." : "Click to select a CSV file"}</span>
+            <input type="file" accept=".csv" className="hidden" ref={fileInputRef} onChange={handleFileUpload} disabled={isProcessing} />
           </div>
 
-          {status.type === 'success' && (
-            <div className="flex items-center gap-2 text-sm text-emerald-600 bg-emerald-500/10 p-3 rounded-md">
-              <CheckCircle2 className="h-4 w-4 shrink-0" />
-              <span>{status.message}</span>
+          {error && (
+            <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 p-3 rounded-md">
+              <AlertCircle className="h-4 w-4 shrink-0" /><span>{error}</span>
             </div>
           )}
-
-          {status.type === 'error' && (
-            <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 p-3 rounded-md">
-              <AlertCircle className="h-4 w-4 shrink-0" />
-              <span>{status.message}</span>
+          
+          {success && (
+            <div className="flex items-center gap-2 text-sm text-emerald-600 bg-emerald-50 p-3 rounded-md dark:bg-emerald-950/50 dark:text-emerald-400">
+              <CheckCircle2 className="h-4 w-4 shrink-0" /><span>{success}</span>
             </div>
           )}
         </div>

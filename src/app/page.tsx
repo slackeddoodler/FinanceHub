@@ -111,7 +111,15 @@ export default function LedgerPage() {
 
   useEffect(() => {
     if (!isDbReady || !isAuthenticated || !spendRepo || !categoryRepo) return;
-    categoryRepo.findAll().then(setCategories);
+    
+    // CRITICAL FIX: Intercept the fetched categories and hardcode alphabetical sorting
+    categoryRepo.findAll().then((fetchedCategories) => {
+      const alphabeticallySorted = [...fetchedCategories].sort((a, b) => 
+        a.name.localeCompare(b.name)
+      );
+      setCategories(alphabeticallySorted);
+    });
+
     new GetTransactionsUseCase(categoryRepo, spendRepo).execute().then(setData);
   }, [isDbReady, isAuthenticated, spendRepo, categoryRepo, refreshTrigger]);
 
