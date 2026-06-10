@@ -1,8 +1,8 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState } from "react";
+import { useSession, signOut } from "next-auth/react";
 import { ICategoryRepository, ISpendRepository } from "../../domain/interfaces/repositories";
-// 1. Import the new Supabase Repositories
 import { SupabaseCategoryRepository } from "../../data/repositories/SupabaseCategoryRepository";
 import { SupabaseSpendRepository } from "../../data/repositories/SupabaseSpendRepository";
 
@@ -11,22 +11,27 @@ interface AppContextType {
   spendRepo: ISpendRepository | null;
   isDbReady: boolean;
   isAuthenticated: boolean;
-  loginUser: (username: string) => Promise<void>;
-  logoutUser: () => void;
-  userRole: "admin" | "standard";
+  logoutUser: () => Promise<void>;
+  userRole: "admin" | "user";
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
+  // 1. Hook into NextAuth to read the secure browser cookie
+  const { data: session, status } = useSession();
+
   const [categoryRepo, setCategoryRepo] = useState<ICategoryRepository | null>(null);
   const [spendRepo, setSpendRepo] = useState<ISpendRepository | null>(null);
-  
   const [isDbReady, setIsDbReady] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [userRole] = useState<"admin" | "standard">("admin"); 
 
-  // 2. Supabase Initialization
+  // 2. Derive state directly from NextAuth's secure backend validation
+  const isAuthenticated = status === "authenticated";
+  
+  // Extract the role from the token (defaults to "user" if undefined)
+  const userRole = (session?.user?.role as "admin" | "user") || "user";
+
+  // 3. Supabase Initialization
   useEffect(() => {
     // Supabase is cloud-hosted and instantly ready. 
     // We instantiate the repositories immediately on mount.
@@ -35,22 +40,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setIsDbReady(true);
   }, []);
 
-  // 3. Stubbing the Login Function
-  // We keep this signature intact so your existing LockScreen.tsx doesn't crash.
-  // It simply bypasses the old database routing and grants access to the UI.
-  // In the next phase, Auth.js will replace this entirely.
-  const loginUser = async (username: string) => {
-    setIsAuthenticated(true);
-  };
-
-  const logoutUser = () => {
-    setIsAuthenticated(false);
+  // 4. Secure Logout via NextAuth
+  const logoutUser = async () => {
+    // This securely destroys the cookie and redirects the user to the root/login
+    await signOut({ callbackUrl: "/" });
   };
 
   return (
     <AppContext.Provider value={{ 
-      categoryRepo, spendRepo, 
-      isDbReady, isAuthenticated, loginUser, logoutUser, userRole 
+      categoryRepo, 
+      spendRepo, 
+      isDbReady, 
+      isAuthenticated, 
+      logoutUser, 
+      userRole 
     }}>
       {children}
     </AppContext.Provider>

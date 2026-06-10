@@ -14,7 +14,9 @@ import { Input } from "@/components/ui/input";
 import { DashboardSkeleton } from "@/presentation/components/DashboardSkeleton";
 import { LockScreen } from "@/presentation/components/LockScreen";
 import { ThemeToggle } from "@/presentation/components/ThemeToggle";
-import { Save, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Save, AlertCircle, CheckCircle2, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+
+type SortKey = 'allocatedBudget' | 'totalSpent' | 'remaining';
 
 export default function BudgetsPage() {
   const router = useRouter();
@@ -24,9 +26,10 @@ export default function BudgetsPage() {
   const [allSpends, setAllSpends] = useState<SpendItem[]>([]);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   
-  // Track temporary user inputs per category ID
   const [draftBudgets, setDraftBudgets] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
+
+  const [sortConfig, setSortConfig] = useState<{ key: SortKey, direction: 'asc' | 'desc' } | null>(null);
 
   const handleDataRefresh = () => {
     setDraftBudgets({});
@@ -39,12 +42,30 @@ export default function BudgetsPage() {
     spendRepo.findByDateRange(new Date("2000-01-01"), new Date("2100-01-01")).then(setAllSpends);
   }, [isDbReady, isAuthenticated, spendRepo, categoryRepo, refreshTrigger]);
 
+  const requestSort = (key: SortKey) => {
+    let direction: 'asc' | 'desc' = 'asc';
+    
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    } else if (sortConfig && sortConfig.key === key && sortConfig.direction === 'desc') {
+      setSortConfig(null);
+      return;
+    }
+    
+    setSortConfig({ key, direction });
+  };
+
+  const renderSortIcon = (key: SortKey) => {
+    if (sortConfig?.key !== key) return <ArrowUpDown className="ml-2 h-4 w-4 opacity-50 shrink-0" />;
+    return sortConfig.direction === 'asc' ? <ArrowUp className="ml-2 h-4 w-4 shrink-0" /> : <ArrowDown className="ml-2 h-4 w-4 shrink-0" />;
+  };
+
   const budgetMatrix = useMemo(() => {
-    return categories.map(cat => {
+    const mapped = categories.map(cat => {
       const catSpends = allSpends.filter(s => s.categoryId === cat.id);
       const totalSpent = catSpends.reduce((sum, item) => sum + item.totalAmount, 0);
       const remaining = cat.allocatedBudget - totalSpent;
-      const utilization = cat.allocatedBudget > 0 ? Math.min((totalSpent / cat.allocatedBudget) * 100, 100) : (totalSpent > 0 ? 100 : 0);
+      const utilization = cat.allocatedBudget > 0 ? (totalSpent / cat.allocatedBudget) * 100 : (totalSpent > 0 ? 100 : 0);
       
       const isDrafted = draftBudgets[cat.id] !== undefined;
       const draftValue = isDrafted ? Number(draftBudgets[cat.id]) : cat.allocatedBudget;
@@ -59,8 +80,21 @@ export default function BudgetsPage() {
         hasChanged,
         draftValue
       };
-    }).sort((a, b) => a.name.localeCompare(b.name));
-  }, [categories, allSpends, draftBudgets]);
+    });
+
+    if (sortConfig) {
+      return mapped.sort((a, b) => {
+        const aValue = a[sortConfig.key];
+        const bValue = b[sortConfig.key];
+        
+        if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+
+    return mapped.sort((a, b) => a.name.localeCompare(b.name));
+  }, [categories, allSpends, draftBudgets, sortConfig]);
 
   const changedCount = budgetMatrix.filter(c => c.hasChanged).length;
 
@@ -120,13 +154,39 @@ export default function BudgetsPage() {
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/10 hover:bg-muted/10">
-                <TableHead className="w-[200px] px-4">Category Name</TableHead>
-                <TableHead className="text-right px-4">Current Budget</TableHead>
-                <TableHead className="text-right px-4">Total Spent</TableHead>
-                <TableHead className="text-right px-4">Remaining / Deficit</TableHead>
-                <TableHead className="w-[150px] px-4">Utilization</TableHead>
-                <TableHead className="text-right w-[120px] px-4">New Budget (₹)</TableHead>
-                <TableHead className="w-[100px] text-center px-4">Actions</TableHead>
+                <TableHead className="w-[200px] px-4 align-middle">Category Name</TableHead>
+                
+                <TableHead className="px-6">
+                  <div className="flex items-center justify-end">
+                    <Button variant="ghost" size="sm" onClick={() => requestSort('allocatedBudget')} className="-mr-3 h-8 font-medium">
+                      Current Budget
+                      {renderSortIcon('allocatedBudget')}
+                    </Button>
+                  </div>
+                </TableHead>
+                
+                <TableHead className="px-6">
+                  <div className="flex items-center justify-end">
+                    <Button variant="ghost" size="sm" onClick={() => requestSort('totalSpent')} className="-mr-3 h-8 font-medium">
+                      Total Spent
+                      {renderSortIcon('totalSpent')}
+                    </Button>
+                  </div>
+                </TableHead>
+                
+                {/* CRITICAL FIX: Adjusted padding (pl-2 pr-12) pushes the right-aligned text to the left visually */}
+                <TableHead className="pl-2 pr-12">
+                  <div className="flex items-center justify-end">
+                    <Button variant="ghost" size="sm" onClick={() => requestSort('remaining')} className="-mr-3 h-8 font-medium">
+                      Remaining / Deficit
+                      {renderSortIcon('remaining')}
+                    </Button>
+                  </div>
+                </TableHead>
+                
+                <TableHead className="w-[150px] px-6 align-middle">Utilization</TableHead>
+                <TableHead className="text-right w-[120px] px-6 align-middle">New Budget (₹)</TableHead>
+                <TableHead className="w-[100px] text-center px-6 align-middle">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -136,12 +196,16 @@ export default function BudgetsPage() {
                 budgetMatrix.map((cat) => (
                   <TableRow key={cat.id} className={cat.hasChanged ? "bg-primary/5 hover:bg-primary/10 transition-colors" : ""}>
                     <TableCell className="font-medium px-4">{cat.name}</TableCell>
-                    <TableCell className="text-right text-muted-foreground px-4">{formatINR(cat.allocatedBudget)}</TableCell>
-                    <TableCell className="text-right font-medium px-4">{formatINR(cat.totalSpent)}</TableCell>
-                    <TableCell className={`text-right font-semibold px-4 ${cat.remaining < 0 ? "text-destructive" : "text-emerald-600 dark:text-emerald-400"}`}>
+                    
+                    <TableCell className="text-right text-muted-foreground px-6">{formatINR(cat.allocatedBudget)}</TableCell>
+                    <TableCell className="text-right font-medium px-6">{formatINR(cat.totalSpent)}</TableCell>
+                    
+                    {/* CRITICAL FIX: Matched padding (pl-2 pr-12) to ensure the data perfectly aligns with the shifted header */}
+                    <TableCell className={`text-right font-semibold pl-2 pr-12 ${cat.remaining < 0 ? "text-destructive" : "text-emerald-600 dark:text-emerald-400"}`}>
                       {cat.remaining < 0 ? `-${formatINR(Math.abs(cat.remaining))}` : formatINR(cat.remaining)}
                     </TableCell>
-                    <TableCell className="px-4">
+                    
+                    <TableCell className="px-6">
                       <div className="flex flex-col gap-1.5">
                         <div className="flex justify-between text-[10px] font-bold text-muted-foreground">
                           <span>{cat.utilization.toFixed(0)}%</span>
@@ -150,12 +214,13 @@ export default function BudgetsPage() {
                         <div className="w-full h-1.5 bg-secondary rounded-full overflow-hidden">
                           <div 
                             className={`h-full rounded-full transition-all duration-500 ${cat.utilization >= 100 ? 'bg-destructive' : cat.utilization >= 80 ? 'bg-amber-500' : 'bg-emerald-500'}`} 
-                            style={{ width: `${cat.utilization}%` }} 
+                            style={{ width: `${Math.min(cat.utilization, 100)}%` }} 
                           />
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell className="px-4">
+                    
+                    <TableCell className="px-6">
                       <Input 
                         type="number" 
                         value={cat.draftInput} 
@@ -163,8 +228,8 @@ export default function BudgetsPage() {
                         className={`h-9 w-24 text-right font-medium ${cat.hasChanged ? "border-primary ring-1 ring-primary/20" : ""}`}
                       />
                     </TableCell>
-                    <TableCell className="px-4 text-center">
-                      {/* CRITICAL UX: Inline Save. Only visible if THIS row changed, and disabled if bulk mode (2+ changes) is triggered to force user to use the bulk button */}
+                    
+                    <TableCell className="px-6 text-center">
                       {cat.hasChanged && changedCount === 1 && (
                         <Button 
                           size="sm" 
@@ -187,7 +252,6 @@ export default function BudgetsPage() {
         </CardContent>
       </Card>
 
-      {/* CRITICAL UX: Floating Bulk Save Action Bar. Only appears when 2 or more rows have unsaved changes */}
       {changedCount >= 2 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-10 fade-in duration-300">
           <Card className="shadow-xl border-primary/20 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">

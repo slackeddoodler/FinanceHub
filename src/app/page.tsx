@@ -13,7 +13,6 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Label } from "@/components/ui/label";
 import { Calendar } from "@/components/ui/calendar";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DashboardSkeleton } from "@/presentation/components/DashboardSkeleton";
 import { LockScreen } from "@/presentation/components/LockScreen";
 import { ThemeToggle } from "@/presentation/components/ThemeToggle";
@@ -33,6 +32,41 @@ import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 
 type SortableFields = "date" | "totalAmount" | "amountPaid" | "pendingAmount" | "lastDateOfPayment";
+
+// CRITICAL UI UPGRADE: Reusable Modern Dropdown mirroring the Categories Selector styling
+function ModernSelect({ value, onValueChange, options, placeholder, className }: { value?: string, onValueChange: (val: string) => void, options: {label: string, value: string}[], placeholder: string, className?: string }) {
+  const [open, setOpen] = useState(false);
+  const selectedLabel = value ? options.find(o => o.value === value)?.label : placeholder;
+  
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" className={cn("justify-between font-normal px-2", className)}>
+          <span className="truncate">{selectedLabel || placeholder}</span>
+          <ChevronDown className="h-3 w-3 opacity-50 ml-1 shrink-0" />
+        </Button>
+      </PopoverTrigger>
+      {/* var(--radix-popover-trigger-width) automatically aligns the dropdown width to match the trigger button exactly */}
+      <PopoverContent className="p-1 shadow-lg" style={{ width: 'var(--radix-popover-trigger-width)' }} align="start">
+        <div className="max-h-[200px] overflow-y-auto flex flex-col gap-0.5 custom-scrollbar">
+          {options.map(opt => {
+            const isSelected = opt.value === value;
+            return (
+              <div
+                key={opt.value}
+                onClick={() => { onValueChange(opt.value); setOpen(false); }}
+                className={cn("flex items-center justify-between px-2 py-1.5 text-xs rounded-sm cursor-pointer hover:bg-muted transition-colors", isSelected && "bg-primary/10 text-primary font-medium")}
+              >
+                <span className="truncate pr-4">{opt.label}</span>
+                {isSelected && <Check className="h-3 w-3 shrink-0" />}
+              </div>
+            );
+          })}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 export default function LedgerPage() {
   const router = useRouter();
@@ -125,7 +159,6 @@ export default function LedgerPage() {
   useEffect(() => {
     if (!isDbReady || !isAuthenticated || !spendRepo || !categoryRepo) return;
     
-    // CRITICAL FIX: Intercept the fetched categories and hardcode alphabetical sorting
     categoryRepo.findAll().then((fetchedCategories) => {
       const alphabeticallySorted = [...fetchedCategories].sort((a, b) => 
         a.name.localeCompare(b.name)
@@ -257,7 +290,6 @@ export default function LedgerPage() {
       <div className="space-y-2">
         <div className="flex justify-end items-center gap-2 pt-2 pb-4">
           
-          {/* CRITICAL UX FEATURE: The Modern Category Dropdown Menu */}
           <Popover>
             <PopoverTrigger asChild>
               <Button variant="outline" size="sm" className="flex items-center space-x-2 h-9 bg-background">
@@ -325,15 +357,17 @@ export default function LedgerPage() {
             <PopoverContent className="w-80 space-y-4" align="end">
               <div className="flex items-center justify-between">
                 <h4 className="font-semibold text-sm leading-none">Filter by Date</h4>
-                <Select value={inputFilterType} onValueChange={(val: "date" | "lastDateOfPayment") => setInputFilterType(val)}>
-                  <SelectTrigger className="h-7 w-[130px] text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="date" className="text-xs">Payment Date</SelectItem>
-                    <SelectItem value="lastDateOfPayment" className="text-xs">Due Date</SelectItem>
-                  </SelectContent>
-                </Select>
+                {/* UPGRADED: Date Filter Type */}
+                <ModernSelect 
+                  value={inputFilterType} 
+                  onValueChange={(val) => setInputFilterType(val as "date" | "lastDateOfPayment")} 
+                  options={[
+                    {label: "Payment Date", value: "date"}, 
+                    {label: "Due Date", value: "lastDateOfPayment"}
+                  ]} 
+                  placeholder="Select Date Type" 
+                  className="h-7 w-[130px] text-xs" 
+                />
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-2 flex flex-col">
@@ -363,60 +397,61 @@ export default function LedgerPage() {
               <div className="space-y-2 pt-1 border-t mt-3">
                 <Label className="text-xs mb-1">Quick Select (Month, Quarter & Year)</Label>
                 <div className="grid grid-cols-3 gap-2">
-                  <Select onValueChange={(val) => {
-                    const monthIdx = parseInt(val);
-                    const y = inputStart ? inputStart.getFullYear() : new Date().getFullYear();
-                    setInputStart(new Date(y, monthIdx, 1));
-                    setInputEnd(new Date(y, monthIdx + 1, 0));
-                  }}>
-                    <SelectTrigger className="w-full h-9 text-xs px-2"><SelectValue placeholder="Month" /></SelectTrigger>
-                    <SelectContent className="max-h-[300px]">
-                      <SelectGroup>
-                        {months.map((m, i) => <SelectItem key={i} value={i.toString()}>{m}</SelectItem>)}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-
-                  <Select onValueChange={(val) => {
-                    const q = parseInt(val);
-                    const y = inputStart ? inputStart.getFullYear() : new Date().getFullYear();
-                    let mStart = 0, mEnd = 2;
-                    if (q === 1) { mStart = 0; mEnd = 2; }
-                    if (q === 2) { mStart = 3; mEnd = 5; }
-                    if (q === 3) { mStart = 6; mEnd = 8; }
-                    if (q === 4) { mStart = 9; mEnd = 11; }
-                    setInputStart(new Date(y, mStart, 1));
-                    setInputEnd(new Date(y, mEnd + 1, 0));
-                  }}>
-                    <SelectTrigger className="w-full h-9 text-xs px-2"><SelectValue placeholder="Qtr" /></SelectTrigger>
-                    <SelectContent className="max-h-[300px]">
-                      <SelectGroup>
-                        <SelectItem value="1">Q1</SelectItem>
-                        <SelectItem value="2">Q2</SelectItem>
-                        <SelectItem value="3">Q3</SelectItem>
-                        <SelectItem value="4">Q4</SelectItem>
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-
-                  <Select onValueChange={(val) => {
-                    const y = parseInt(val);
-                    if (inputStart && inputEnd && inputStart.getMonth() === inputEnd.getMonth()) {
-                      const monthIdx = inputStart.getMonth();
+                  
+                  {/* UPGRADED: Month Dropdown */}
+                  <ModernSelect
+                    onValueChange={(val) => {
+                      const monthIdx = parseInt(val);
+                      const y = inputStart ? inputStart.getFullYear() : new Date().getFullYear();
                       setInputStart(new Date(y, monthIdx, 1));
                       setInputEnd(new Date(y, monthIdx + 1, 0));
-                    } else {
-                      setInputStart(new Date(y, 0, 1));
-                      setInputEnd(new Date(y, 11, 31));
-                    }
-                  }}>
-                    <SelectTrigger className="w-full h-9 text-xs px-2"><SelectValue placeholder="Year" /></SelectTrigger>
-                    <SelectContent className="max-h-[300px]">
-                      <SelectGroup>
-                        {years.map(y => <SelectItem key={y} value={y.toString()}>{y}</SelectItem>)}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
+                    }}
+                    options={months.map((m, i) => ({ label: m, value: i.toString() }))}
+                    placeholder="Month"
+                    className="w-full h-9 text-xs"
+                  />
+
+                  {/* UPGRADED: Quarter Dropdown */}
+                  <ModernSelect
+                    onValueChange={(val) => {
+                      const q = parseInt(val);
+                      const y = inputStart ? inputStart.getFullYear() : new Date().getFullYear();
+                      let mStart = 0, mEnd = 2;
+                      if (q === 1) { mStart = 0; mEnd = 2; }
+                      if (q === 2) { mStart = 3; mEnd = 5; }
+                      if (q === 3) { mStart = 6; mEnd = 8; }
+                      if (q === 4) { mStart = 9; mEnd = 11; }
+                      setInputStart(new Date(y, mStart, 1));
+                      setInputEnd(new Date(y, mEnd + 1, 0));
+                    }}
+                    options={[
+                      {label: "Q1", value: "1"}, 
+                      {label: "Q2", value: "2"}, 
+                      {label: "Q3", value: "3"}, 
+                      {label: "Q4", value: "4"}
+                    ]}
+                    placeholder="Qtr"
+                    className="w-full h-9 text-xs"
+                  />
+
+                  {/* UPGRADED: Year Dropdown */}
+                  <ModernSelect
+                    onValueChange={(val) => {
+                      const y = parseInt(val);
+                      if (inputStart && inputEnd && inputStart.getMonth() === inputEnd.getMonth()) {
+                        const monthIdx = inputStart.getMonth();
+                        setInputStart(new Date(y, monthIdx, 1));
+                        setInputEnd(new Date(y, monthIdx + 1, 0));
+                      } else {
+                        setInputStart(new Date(y, 0, 1));
+                        setInputEnd(new Date(y, 11, 31));
+                      }
+                    }}
+                    options={years.map(y => ({ label: y.toString(), value: y.toString() }))}
+                    placeholder="Year"
+                    className="w-full h-9 text-xs"
+                  />
+
                 </div>
               </div>
               <div className="flex gap-2 pt-2">
@@ -432,11 +467,9 @@ export default function LedgerPage() {
           ) : (
             groupedCategories.map((group) => (
               <Card key={group.id} className="overflow-hidden shadow-sm">
-                {/* CRITICAL UX FEATURE: 'group' class added to track hover state across the entire header */}
                 <CardHeader className="bg-muted/30 border-b pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 group">
                   <div className="flex items-center gap-3">
                     <CardTitle className="text-xl">{group.name}</CardTitle>
-                    {/* CRITICAL UX FEATURE: Edit/Delete buttons dynamically appear on hover */}
                     <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center gap-1">
                       <EditCategoryDialog category={group} onUpdated={handleDataRefresh} />
                       <DeleteCategoryDialog 
@@ -503,36 +536,54 @@ export default function LedgerPage() {
                         <TableRow><TableCell colSpan={8} className="text-center py-6 text-muted-foreground italic px-2">No transactions.</TableCell></TableRow>
                       ) : (
                         group.spends.map((item, index) => (
-                          <TableRow key={item.id} className="group/row">
+                          <TableRow key={item.id}>
                             <TableCell className="text-center text-muted-foreground px-2">{index + 1}</TableCell>
+                            
                             <TableCell className="font-medium px-2">
-                              <div className="flex items-center gap-2">
-                                <EditItemNameDialog transactionId={item.id} currentName={item.itemName} onUpdated={handleDataRefresh} />
+                              <div className="flex items-center gap-2 group">
+                                <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200 shrink-0">
+                                  <EditItemNameDialog transactionId={item.id} currentName={item.itemName} onUpdated={handleDataRefresh} />
+                                </div>
                                 <span className="truncate">{item.itemName}</span>
                               </div>
                             </TableCell>
+                            
                             <TableCell className="text-right px-2">
-                              <div className="flex items-center justify-end gap-2">
-                                <EditTotalAmountDialog transactionId={item.id} currentTotal={item.totalAmount} amountPaid={item.amountPaid} onUpdated={handleDataRefresh} />
+                              <div className="flex items-center justify-end gap-2 group">
+                                <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200 shrink-0">
+                                  <EditTotalAmountDialog transactionId={item.id} currentTotal={item.totalAmount} amountPaid={item.amountPaid} onUpdated={handleDataRefresh} />
+                                </div>
                                 <span>{formatINR(item.totalAmount)}</span>
                               </div>
                             </TableCell>
+                            
                             <TableCell className="text-right px-2">
-                              <div className="flex items-center justify-end gap-2">
-                                <EditAmountDialog transactionId={item.id} currentAmountPaid={item.amountPaid} totalAmount={item.totalAmount} onUpdated={handleDataRefresh} />
+                              <div className="flex items-center justify-end gap-2 group">
+                                <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200 shrink-0">
+                                  <EditAmountDialog transactionId={item.id} currentAmountPaid={item.amountPaid} totalAmount={item.totalAmount} onUpdated={handleDataRefresh} />
+                                </div>
                                 <span>{formatINR(item.amountPaid)}</span>
                               </div>
                             </TableCell>
-                            <TableCell className={`text-right px-2 ${item.pendingAmount > 0 ? "text-destructive font-medium" : ""}`}>{formatINR(item.pendingAmount)}</TableCell>
+                            
+                            <TableCell className={`text-right px-2 ${item.pendingAmount > 0 ? "text-destructive font-medium" : ""}`}>
+                              {formatINR(item.pendingAmount)}
+                            </TableCell>
+                            
                             <TableCell className="text-right px-2">
-                              <div className="flex items-center justify-end gap-2">
-                                <EditPaymentDateDialog transactionId={item.id} currentDate={item.date} onUpdated={handleDataRefresh} />
+                              <div className="flex items-center justify-end gap-2 group">
+                                <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200 shrink-0">
+                                  <EditPaymentDateDialog transactionId={item.id} currentDate={item.date} onUpdated={handleDataRefresh} />
+                                </div>
                                 <span className="text-muted-foreground">{item.date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
                               </div>
                             </TableCell>
+                            
                             <TableCell className="text-right cursor-pointer px-2">
-                              <div className="flex items-center justify-end gap-2">
-                                <EditLastDateDialog transactionId={item.id} currentDate={item.lastDateOfPayment} onUpdated={handleDataRefresh} />
+                              <div className="flex items-center justify-end gap-2 group">
+                                <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200 shrink-0">
+                                  <EditLastDateDialog transactionId={item.id} currentDate={item.lastDateOfPayment} paymentDate={item.date} onUpdated={handleDataRefresh} />
+                                </div>
                                 <span className={item.pendingAmount > 0 && item.lastDateOfPayment && item.lastDateOfPayment < new Date() ? "text-destructive font-medium" : "text-muted-foreground"}>
                                   {item.lastDateOfPayment ? item.lastDateOfPayment.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : <span className="italic">Not Set</span>}
                                 </span>

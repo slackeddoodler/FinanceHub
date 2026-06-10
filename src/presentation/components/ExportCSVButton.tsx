@@ -1,87 +1,93 @@
 "use client";
 
 import { useState } from "react";
+import { useAppStore } from "../store/AppProvider";
 import { Button } from "@/components/ui/button";
 import { Download } from "lucide-react";
-import { useAppStore } from "../store/AppProvider";
+import Papa from "papaparse";
 
 export function ExportCSVButton() {
   const { categoryRepo, spendRepo } = useAppStore();
   const [isExporting, setIsExporting] = useState(false);
 
-  const handleExport = async () => {
+  // Retaining the successful ISO date format
+  const formatForExcelDate = (date: Date | null | undefined) => {
+    if (!date) return "";
+    const d = String(date.getDate()).padStart(2, "0");
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const y = date.getFullYear();
+    return `${y}-${m}-${d}`; 
+  };
+
+  const formatFilenameDate = (date: Date) => {
+    const d = String(date.getDate()).padStart(2, "0");
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const y = date.getFullYear();
+    return `${d}-${m}-${y}`; 
+  };
+
+  const handleExportCSV = async () => {
     if (!categoryRepo || !spendRepo) return;
     setIsExporting(true);
-    
+
     try {
       const categories = await categoryRepo.findAll();
       const spends = await spendRepo.findByDateRange(new Date(0), new Date("2100-01-01"));
 
-      const headers = [
-        "Category Name", 
-        "Category Budget", 
-        "Item Name", 
-        "Description", 
-        "Total Amount", 
-        "Amount Paid", 
-        "Date", 
-        "Last Date of Payment"
-      ];
-      
-      const rows: string[] = [headers.join(",")];
       const catMap = new Map(categories.map(c => [c.id, c]));
-      const categoriesWithSpends = new Set<string>();
 
-      // 1. Export all transactions mapped to their parent category & budget
-      spends.forEach(spend => {
-        categoriesWithSpends.add(spend.categoryId);
-        const cat = catMap.get(spend.categoryId);
-        if (!cat) return;
-        
-        const row = [
-          `"${cat.name.replace(/"/g, '""')}"`,
-          cat.allocatedBudget,
-          `"${spend.itemName.replace(/"/g, '""')}"`,
-          `"${(spend.description || "").replace(/"/g, '""')}"`,
-          spend.totalAmount,
-          spend.amountPaid,
-          spend.date.toISOString(),
-          spend.lastDateOfPayment ? spend.lastDateOfPayment.toISOString() : ""
-        ];
-        rows.push(row.join(","));
+      // Sort natively by Date timestamp (Oldest to Newest)
+      spends.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+      // Passing pure, unformatted numbers and strings to PapaParse
+      const rawData = spends.map(spend => {
+        const category = catMap.get(spend.categoryId);
+        const categoryName = category ? category.name : "Unknown Category";
+        const categoryBudget = category ? category.allocatedBudget : 0;
+        const remainingAmount = spend.totalAmount - spend.amountPaid;
+
+        return {
+          "Item Name": spend.itemName,
+          "Category": categoryName,
+          "Category Budget": categoryBudget,
+          "Total Amount": spend.totalAmount,
+          "Amount Paid": spend.amountPaid,
+          "Remaining": remainingAmount,
+          "Date of Payment": formatForExcelDate(spend.date),
+          "Due Date": formatForExcelDate(spend.lastDateOfPayment)
+        };
       });
 
-      // 2. Safely export categories that have ZERO transactions so their budgets aren't lost
-      categories.forEach(cat => {
-        if (!categoriesWithSpends.has(cat.id)) {
-          const row = [
-            `"${cat.name.replace(/"/g, '""')}"`,
-            cat.allocatedBudget,
-            "", "", "", "", "", "" // Empty transaction fields
-          ];
-          rows.push(row.join(","));
-        }
+      // PapaParse handles all necessary escaping automatically
+      const csvString = Papa.unparse(rawData, {
+        header: true,
       });
 
-      const csvContent = "data:text/csv;charset=utf-8," + rows.join("\n");
-      const encodedUri = encodeURI(csvContent);
+      // UTF-8 BOM (\uFEFF) forces Excel to strictly parse formatting and special characters
+      const csvContent = "\uFEFF" + csvString;
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      
       const link = document.createElement("a");
-      link.setAttribute("href", encodedUri);
-      link.setAttribute("download", `financehub_backup_${new Date().toISOString().split('T')[0]}.csv`);
+      link.setAttribute("href", url);
+      link.setAttribute("download", `financehub_export_${formatFilenameDate(new Date())}.csv`);
+      
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      
+      URL.revokeObjectURL(url);
     } catch (error) {
-      console.error("Export failed:", error);
+      console.error("CSV Export failed:", error);
     } finally {
       setIsExporting(false);
     }
   };
 
   return (
-    <Button variant="outline" size="sm" onClick={handleExport} disabled={isExporting} className="flex items-center space-x-2 h-9 bg-background">
-      <Download className="h-4 w-4" />
-      <span>Export CSV</span>
+    <Button variant="outline" size="sm" onClick={handleExportCSV} disabled={isExporting} className="h-9">
+      <Download className="h-4 w-4 mr-2 shrink-0" />
+      <span>{isExporting ? "Exporting..." : "Export CSV"}</span>
     </Button>
   );
 }

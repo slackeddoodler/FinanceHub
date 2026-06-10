@@ -21,9 +21,20 @@ export function DeleteSpendItemDialog({ transactionId, itemName, onDeleted }: { 
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Trash2 className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive transition-all cursor-pointer shrink-0" />
-      </DialogTrigger>
+      {/* CRITICAL FIX: Self-contained Proximity Hover Zone. 
+          The 'group' class is now built natively into this wrapper. 
+          The padding (p-1.5) creates a small invisible zone 'near' the button that triggers the reveal instantly. */}
+      <div className="group inline-flex p-1.5 -m-1.5 rounded-md cursor-pointer">
+        <DialogTrigger asChild>
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="h-8 w-8 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-destructive hover:bg-destructive/10 hover:text-destructive transition-all shrink-0"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </DialogTrigger>
+      </div>
       <DialogContent className="sm:max-w-[400px]">
         <DialogHeader>
           <DialogTitle>Delete Transaction?</DialogTitle>
