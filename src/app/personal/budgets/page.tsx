@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
+import { usePathname } from "next/navigation";
 import { useAppStore } from "@/presentation/store/AppProvider";
 import { Category } from "@/domain/entities/Category";
 import { SpendItem } from "@/domain/entities/SpendItem";
@@ -18,7 +19,13 @@ import { Save, AlertCircle, CheckCircle2, ArrowUpDown, ArrowUp, ArrowDown } from
 type SortKey = 'allocatedBudget' | 'totalSpent' | 'remaining';
 
 export default function PersonalBudgetsPage() {
-  const { isDbReady, isAuthenticated, spendRepo, categoryRepo } = useAppStore();
+  const pathname = usePathname();
+  // CRITICAL FIX: Extracted userRole from the store
+  const { isDbReady, isAuthenticated, spendRepo, categoryRepo, userRole } = useAppStore();
+  
+  // --- RBAC PERMISSION CHECK ---
+  const isPersonal = pathname?.startsWith("/personal");
+  const canEdit = isPersonal || userRole === "admin" || userRole === "editor";
   
   const [categories, setCategories] = useState<Category[]>([]);
   const [allSpends, setAllSpends] = useState<SpendItem[]>([]);
@@ -176,13 +183,15 @@ export default function PersonalBudgetsPage() {
                 </TableHead>
                 
                 <TableHead className="w-[150px] px-6 align-middle">Utilization</TableHead>
-                <TableHead className="text-right w-[120px] px-6 align-middle">New Budget (₹)</TableHead>
-                <TableHead className="w-[100px] text-center px-6 align-middle">Actions</TableHead>
+                
+                {/* CRITICAL FIX: Hide the Input and Action headers from Viewers */}
+                {canEdit && <TableHead className="text-right w-[120px] px-6 align-middle">New Budget (₹)</TableHead>}
+                {canEdit && <TableHead className="w-[100px] text-center px-6 align-middle">Actions</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
               {budgetMatrix.length === 0 ? (
-                <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">No categories available.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={canEdit ? 7 : 5} className="text-center py-8 text-muted-foreground">No categories available.</TableCell></TableRow>
               ) : (
                 budgetMatrix.map((cat) => (
                   <TableRow key={cat.id} className={cat.hasChanged ? "bg-primary/5 hover:bg-primary/10 transition-colors" : ""}>
@@ -210,30 +219,36 @@ export default function PersonalBudgetsPage() {
                       </div>
                     </TableCell>
                     
-                    <TableCell className="px-6">
-                      <Input 
-                        type="number" 
-                        value={cat.draftInput} 
-                        onChange={(e) => setDraftBudgets(prev => ({ ...prev, [cat.id]: e.target.value }))}
-                        className={`h-9 w-24 text-right font-medium ${cat.hasChanged ? "border-primary ring-1 ring-primary/20" : ""}`}
-                      />
-                    </TableCell>
+                    {/* CRITICAL FIX: Hide the budget inputs from Viewers */}
+                    {canEdit && (
+                      <TableCell className="px-6">
+                        <Input 
+                          type="number" 
+                          value={cat.draftInput} 
+                          onChange={(e) => setDraftBudgets(prev => ({ ...prev, [cat.id]: e.target.value }))}
+                          className={`h-9 w-24 text-right font-medium ${cat.hasChanged ? "border-primary ring-1 ring-primary/20" : ""}`}
+                        />
+                      </TableCell>
+                    )}
                     
-                    <TableCell className="px-6 text-center">
-                      {cat.hasChanged && changedCount === 1 && (
-                        <Button 
-                          size="sm" 
-                          onClick={() => handleSaveSingle(cat.id, cat.draftValue)}
-                          disabled={isSaving}
-                          className="h-8 w-full animate-in fade-in zoom-in-95 duration-200"
-                        >
-                          <Save className="h-3.5 w-3.5 mr-1.5" /> Save
-                        </Button>
-                      )}
-                      {cat.hasChanged && changedCount > 1 && (
-                        <CheckCircle2 className="h-5 w-5 mx-auto text-primary animate-in fade-in zoom-in-95" />
-                      )}
-                    </TableCell>
+                    {/* CRITICAL FIX: Hide the individual save buttons from Viewers */}
+                    {canEdit && (
+                      <TableCell className="px-6 text-center">
+                        {cat.hasChanged && changedCount === 1 && (
+                          <Button 
+                            size="sm" 
+                            onClick={() => handleSaveSingle(cat.id, cat.draftValue)}
+                            disabled={isSaving}
+                            className="h-8 w-full animate-in fade-in zoom-in-95 duration-200"
+                          >
+                            <Save className="h-3.5 w-3.5 mr-1.5" /> Save
+                          </Button>
+                        )}
+                        {cat.hasChanged && changedCount > 1 && (
+                          <CheckCircle2 className="h-5 w-5 mx-auto text-primary animate-in fade-in zoom-in-95" />
+                        )}
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))
               )}
@@ -242,7 +257,8 @@ export default function PersonalBudgetsPage() {
         </CardContent>
       </Card>
 
-      {changedCount >= 2 && (
+      {/* CRITICAL FIX: Only let users with write-access see the global save floating bar */}
+      {canEdit && changedCount >= 2 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-10 fade-in duration-300">
           <Card className="shadow-xl border-primary/20 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
             <CardContent className="flex items-center gap-6 py-3 px-6">

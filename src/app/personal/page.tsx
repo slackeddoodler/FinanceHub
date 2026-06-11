@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
+import { usePathname } from "next/navigation";
 import { useAppStore } from "@/presentation/store/AppProvider";
 import { GetTransactionsUseCase, TransactionDTO } from "@/domain/use-cases/GetTransactionsUseCase";
 import { Category } from "@/domain/entities/Category";
@@ -62,7 +63,12 @@ function ModernSelect({ value, onValueChange, options, placeholder, className }:
 }
 
 export default function PersonalLedgerPage() {
-  const { isDbReady, isAuthenticated, spendRepo, categoryRepo } = useAppStore();
+  const pathname = usePathname();
+  const { isDbReady, isAuthenticated, spendRepo, categoryRepo, userRole } = useAppStore();
+  
+  // --- RBAC PERMISSION CHECK ---
+  const isPersonal = pathname?.startsWith("/personal");
+  const canEdit = isPersonal || userRole === "admin" || userRole === "editor";
   
   const [data, setData] = useState<TransactionDTO[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -70,7 +76,6 @@ export default function PersonalLedgerPage() {
   
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   
-  // CRITICAL FIX: Isolated Session Storage Keys for Personal Workspace
   const [activeStart, setActiveStart] = useState<Date | undefined>(() => {
     if (typeof window !== "undefined") {
       const saved = sessionStorage.getItem("financehub_personal_date_filters");
@@ -258,7 +263,6 @@ export default function PersonalLedgerPage() {
   return (
     <main className="min-h-screen bg-background text-foreground p-8 space-y-6">
       
-      {/* GLOBAL HEADER IS INJECTED HERE */}
       <GlobalHeader 
         title="Personal Ledger" 
         subtitle="Your secure, isolated transaction tracker." 
@@ -442,14 +446,19 @@ export default function PersonalLedgerPage() {
                   <div className="flex items-center gap-3">
                     <CardTitle className="text-xl">{group.name}</CardTitle>
                     <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center gap-1">
-                      <EditCategoryDialog category={group} onUpdated={handleDataRefresh} />
-                      <DeleteCategoryDialog 
-                        category={group} 
-                        onDeleted={() => { 
-                          if(activeCats.includes(group.id)) setActiveCats(prev => prev.filter(id => id !== group.id)); 
-                          handleDataRefresh(); 
-                        }} 
-                      />
+                      {/* CRITICAL FIX: Wrap Category Actions */}
+                      {canEdit && (
+                        <>
+                          <EditCategoryDialog category={group} onUpdated={handleDataRefresh} />
+                          <DeleteCategoryDialog 
+                            category={group} 
+                            onDeleted={() => { 
+                              if(activeCats.includes(group.id)) setActiveCats(prev => prev.filter(id => id !== group.id)); 
+                              handleDataRefresh(); 
+                            }} 
+                          />
+                        </>
+                      )}
                     </div>
                   </div>
                   <div className="text-right sm:text-left flex flex-col sm:flex-row gap-2 sm:gap-6 text-sm font-medium">
@@ -499,12 +508,13 @@ export default function PersonalLedgerPage() {
                           </div>
                         </TableHead>
                         
-                        <TableHead className="w-[40px] px-2"></TableHead>
+                        {/* CRITICAL FIX: Hide action header conditionally */}
+                        {canEdit && <TableHead className="w-[40px] px-2"></TableHead>}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {group.spends.length === 0 ? (
-                        <TableRow><TableCell colSpan={8} className="text-center py-6 text-muted-foreground italic px-2">No transactions.</TableCell></TableRow>
+                        <TableRow><TableCell colSpan={canEdit ? 8 : 7} className="text-center py-6 text-muted-foreground italic px-2">No transactions.</TableCell></TableRow>
                       ) : (
                         group.spends.map((item, index) => (
                           <TableRow key={item.id}>
@@ -512,27 +522,34 @@ export default function PersonalLedgerPage() {
                             
                             <TableCell className="font-medium px-2">
                               <div className="flex items-center gap-2 group">
-                                <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200 shrink-0">
-                                  <EditItemNameDialog transactionId={item.id} currentName={item.itemName} onUpdated={handleDataRefresh} />
-                                </div>
+                                {/* CRITICAL FIX: Hide Edit Actions */}
+                                {canEdit && (
+                                  <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200 shrink-0">
+                                    <EditItemNameDialog transactionId={item.id} currentName={item.itemName} onUpdated={handleDataRefresh} />
+                                  </div>
+                                )}
                                 <span className="truncate">{item.itemName}</span>
                               </div>
                             </TableCell>
                             
                             <TableCell className="text-right px-2">
                               <div className="flex items-center justify-end gap-2 group">
-                                <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200 shrink-0">
-                                  <EditTotalAmountDialog transactionId={item.id} currentTotal={item.totalAmount} amountPaid={item.amountPaid} onUpdated={handleDataRefresh} />
-                                </div>
+                                {canEdit && (
+                                  <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200 shrink-0">
+                                    <EditTotalAmountDialog transactionId={item.id} currentTotal={item.totalAmount} amountPaid={item.amountPaid} onUpdated={handleDataRefresh} />
+                                  </div>
+                                )}
                                 <span>{formatINR(item.totalAmount)}</span>
                               </div>
                             </TableCell>
                             
                             <TableCell className="text-right px-2">
                               <div className="flex items-center justify-end gap-2 group">
-                                <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200 shrink-0">
-                                  <EditAmountDialog transactionId={item.id} currentAmountPaid={item.amountPaid} totalAmount={item.totalAmount} onUpdated={handleDataRefresh} />
-                                </div>
+                                {canEdit && (
+                                  <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200 shrink-0">
+                                    <EditAmountDialog transactionId={item.id} currentAmountPaid={item.amountPaid} totalAmount={item.totalAmount} onUpdated={handleDataRefresh} />
+                                  </div>
+                                )}
                                 <span>{formatINR(item.amountPaid)}</span>
                               </div>
                             </TableCell>
@@ -543,27 +560,34 @@ export default function PersonalLedgerPage() {
                             
                             <TableCell className="text-right px-2">
                               <div className="flex items-center justify-end gap-2 group">
-                                <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200 shrink-0">
-                                  <EditPaymentDateDialog transactionId={item.id} currentDate={item.date} onUpdated={handleDataRefresh} />
-                                </div>
+                                {canEdit && (
+                                  <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200 shrink-0">
+                                    <EditPaymentDateDialog transactionId={item.id} currentDate={item.date} onUpdated={handleDataRefresh} />
+                                  </div>
+                                )}
                                 <span className="text-muted-foreground">{item.date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
                               </div>
                             </TableCell>
                             
                             <TableCell className="text-right cursor-pointer px-2">
                               <div className="flex items-center justify-end gap-2 group">
-                                <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200 shrink-0">
-                                  <EditLastDateDialog transactionId={item.id} currentDate={item.lastDateOfPayment} paymentDate={item.date} onUpdated={handleDataRefresh} />
-                                </div>
+                                {canEdit && (
+                                  <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200 shrink-0">
+                                    <EditLastDateDialog transactionId={item.id} currentDate={item.lastDateOfPayment} paymentDate={item.date} onUpdated={handleDataRefresh} />
+                                  </div>
+                                )}
                                 <span className={item.pendingAmount > 0 && item.lastDateOfPayment && item.lastDateOfPayment < new Date() ? "text-destructive font-medium" : "text-muted-foreground"}>
                                   {item.lastDateOfPayment ? item.lastDateOfPayment.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : <span className="italic">Not Set</span>}
                                 </span>
                               </div>
                             </TableCell>
                             
-                            <TableCell className="text-right px-2 pl-4">
-                              <DeleteSpendItemDialog transactionId={item.id} itemName={item.itemName} onDeleted={handleDataRefresh} />
-                            </TableCell>
+                            {/* CRITICAL FIX: Hide Delete Column */}
+                            {canEdit && (
+                              <TableCell className="text-right px-2 pl-4">
+                                <DeleteSpendItemDialog transactionId={item.id} itemName={item.itemName} onDeleted={handleDataRefresh} />
+                              </TableCell>
+                            )}
                           </TableRow>
                         ))
                       )}
