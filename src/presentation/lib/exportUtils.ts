@@ -4,8 +4,8 @@ import { Category } from "../../domain/entities/Category";
 import { SpendItem } from "../../domain/entities/SpendItem";
 
 export function exportToCSV(categories: Category[], spends: SpendItem[]) {
-  // CRITICAL FIX: Pure transaction data matching the Ledger UI column flow exactly
-  let csv = "Category,Item Name,Total Amount,Amount Paid,Remaining Amount,Date of Payment,Due Date\n";
+  // CRITICAL FIX: Add Transaction ID to the front of the CSV payload
+  let csv = "Transaction ID,Category,Item Name,Total Amount,Amount Paid,Remaining Amount,Date of Payment,Due Date\n";
 
   const sortedSpends = [...spends].sort((a, b) => b.date.getTime() - a.date.getTime());
 
@@ -17,8 +17,11 @@ export function exportToCSV(categories: Category[], spends: SpendItem[]) {
     const dateStr = s.date.toLocaleDateString('en-IN');
     const dueDateStr = s.lastDateOfPayment ? s.lastDateOfPayment.toLocaleDateString('en-IN') : "Not Set";
     const pending = s.totalAmount - s.amountPaid;
+    
+    // Fallback to internal UUID if the item predates this feature
+    const txnId = s.transactionId || s.id; 
 
-    csv += `${catName},${safeItemName},${s.totalAmount},${s.amountPaid},${pending},${dateStr},${dueDateStr}\n`;
+    csv += `"${txnId}",${catName},${safeItemName},${s.totalAmount},${s.amountPaid},${pending},${dateStr},${dueDateStr}\n`;
   });
 
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });

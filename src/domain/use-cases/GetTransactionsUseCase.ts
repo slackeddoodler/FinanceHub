@@ -10,6 +10,7 @@ export interface TransactionDTO {
   pendingAmount: number;
   date: Date;
   lastDateOfPayment: Date | null;
+  transactionId: string | null;
 }
 
 export class GetTransactionsUseCase {
@@ -30,7 +31,8 @@ export class GetTransactionsUseCase {
       amountPaid: s.amountPaid,
       pendingAmount: s.pendingAmount,
       date: s.date,
-      lastDateOfPayment: s.lastDateOfPayment || null
+      lastDateOfPayment: s.lastDateOfPayment || null,
+      transactionId: s.transactionId || null
     }));
   }
 }

@@ -61,7 +61,7 @@ function ModernSelect({ value, onValueChange, options, placeholder, className }:
   );
 }
 
-export default function LedgerPage() {
+export default function PersonalLedgerPage() {
   const { isDbReady, isAuthenticated, spendRepo, categoryRepo } = useAppStore();
   
   const [data, setData] = useState<TransactionDTO[]>([]);
@@ -70,9 +70,10 @@ export default function LedgerPage() {
   
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   
+  // CRITICAL FIX: Isolated Session Storage Keys for Personal Workspace
   const [activeStart, setActiveStart] = useState<Date | undefined>(() => {
     if (typeof window !== "undefined") {
-      const saved = sessionStorage.getItem("financehub_date_filters");
+      const saved = sessionStorage.getItem("financehub_personal_date_filters");
       if (saved) { try { const p = JSON.parse(saved); if (p.startDate) return new Date(p.startDate); } catch(e){} }
     }
     return undefined;
@@ -80,7 +81,7 @@ export default function LedgerPage() {
 
   const [activeEnd, setActiveEnd] = useState<Date | undefined>(() => {
     if (typeof window !== "undefined") {
-      const saved = sessionStorage.getItem("financehub_date_filters");
+      const saved = sessionStorage.getItem("financehub_personal_date_filters");
       if (saved) { try { const p = JSON.parse(saved); if (p.endDate) return new Date(p.endDate); } catch(e){} }
     }
     return undefined;
@@ -88,7 +89,7 @@ export default function LedgerPage() {
 
   const [activeFilterType, setActiveFilterType] = useState<"date" | "lastDateOfPayment">(() => {
     if (typeof window !== "undefined") {
-      const saved = sessionStorage.getItem("financehub_date_filters");
+      const saved = sessionStorage.getItem("financehub_personal_date_filters");
       if (saved) { try { const p = JSON.parse(saved); if (p.filterType) return p.filterType; } catch(e){} }
     }
     return "date";
@@ -100,7 +101,7 @@ export default function LedgerPage() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      sessionStorage.setItem("financehub_date_filters", JSON.stringify({
+      sessionStorage.setItem("financehub_personal_date_filters", JSON.stringify({
         startDate: activeStart ? activeStart.toISOString() : null,
         endDate: activeEnd ? activeEnd.toISOString() : null,
         filterType: activeFilterType
@@ -110,7 +111,7 @@ export default function LedgerPage() {
 
   useEffect(() => {
     if (isFilterOpen && typeof window !== "undefined") {
-      const saved = sessionStorage.getItem("financehub_date_filters");
+      const saved = sessionStorage.getItem("financehub_personal_date_filters");
       if (saved) {
         try {
           const p = JSON.parse(saved);
@@ -128,7 +129,7 @@ export default function LedgerPage() {
   
   const [activeCats, setActiveCats] = useState<string[]>(() => {
     if (typeof window !== "undefined") {
-      const saved = sessionStorage.getItem("financehub_active_cats");
+      const saved = sessionStorage.getItem("financehub_personal_active_cats");
       if (saved) { try { return JSON.parse(saved); } catch(e){} }
     }
     return [];
@@ -142,7 +143,7 @@ export default function LedgerPage() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      sessionStorage.setItem("financehub_active_cats", JSON.stringify(activeCats));
+      sessionStorage.setItem("financehub_personal_active_cats", JSON.stringify(activeCats));
     }
   }, [activeCats]);
 
@@ -256,15 +257,18 @@ export default function LedgerPage() {
 
   return (
     <main className="min-h-screen bg-background text-foreground p-8 space-y-6">
+      
+      {/* GLOBAL HEADER IS INJECTED HERE */}
       <GlobalHeader 
-        title="Company Ledger" 
-        subtitle="Shared corporate transaction tracker." 
+        title="Personal Ledger" 
+        subtitle="Your secure, isolated transaction tracker." 
         activePage="ledger" 
         handleDataRefresh={handleDataRefresh} 
       />
 
       <div className="space-y-2">
         <div className="flex justify-end items-center gap-2 pt-2 pb-4">
+          
           <Popover>
             <PopoverTrigger asChild>
               <Button variant="outline" size="sm" className="flex items-center space-x-2 h-9 bg-background">

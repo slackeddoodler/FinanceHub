@@ -17,7 +17,7 @@ import { Save, AlertCircle, CheckCircle2, ArrowUpDown, ArrowUp, ArrowDown } from
 
 type SortKey = 'allocatedBudget' | 'totalSpent' | 'remaining';
 
-export default function BudgetsPage() {
+export default function PersonalBudgetsPage() {
   const { isDbReady, isAuthenticated, spendRepo, categoryRepo } = useAppStore();
   
   const [categories, setCategories] = useState<Category[]>([]);
@@ -128,9 +128,11 @@ export default function BudgetsPage() {
 
   return (
     <main className="min-h-screen bg-background text-foreground p-8 space-y-6 pb-24">
+      
+      {/* GLOBAL HEADER IS INJECTED HERE */}
       <GlobalHeader 
-        title="Company Budgets" 
-        subtitle="Manage cross-departmental allocations." 
+        title="Personal Budgets" 
+        subtitle="Manage your private allocations." 
         activePage="budgets" 
         handleDataRefresh={handleDataRefresh} 
       />

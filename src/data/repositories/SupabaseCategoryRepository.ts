@@ -3,21 +3,35 @@ import { Category } from "../../domain/entities/Category";
 import { supabase } from "../database/supabase";
 
 export class SupabaseCategoryRepository implements ICategoryRepository {
+  constructor(private isPersonal: boolean = false, private userId: string | null = null) {}
+
   async save(category: Category): Promise<void> {
+    if (this.isPersonal && !this.userId) {
+      throw new Error("Critical Error: Missing User UUID for Personal Category creation.");
+    }
+
     const { error } = await supabase.from('categories').upsert({
       id: category.id,
       name: category.name,
       allocated_budget: category.allocatedBudget,
       created_at: category.createdAt.toISOString(),
+      user_id: this.isPersonal ? this.userId : null
     });
     if (error) throw new Error(error.message);
   }
 
   async findAll(): Promise<Category[]> {
-    const { data, error } = await supabase
-      .from('categories')
-      .select('*')
-      .order('created_at', { ascending: true });
+    let query = supabase.from('categories').select('*').order('created_at', { ascending: true });
+    
+    // Strict Database-Level Partitioning
+    if (this.isPersonal) {
+      if (!this.userId) return []; // Fail-safe: prevent cross-contamination if ID is missing
+      query = query.eq('user_id', this.userId);
+    } else {
+      query = query.is('user_id', null);
+    }
+
+    const { data, error } = await query;
     
     if (error) throw new Error(error.message);
     if (!data) return [];
@@ -29,31 +43,30 @@ export class SupabaseCategoryRepository implements ICategoryRepository {
       new Date(row.created_at)
     ));
 
-    // Preserve your existing session storage filtering logic
-    if (typeof window !== "undefined" && window.location.pathname.includes("/dashboard")) {
-      const saved = sessionStorage.getItem("financehub_active_cats");
-      if (saved) {
-        try {
-          const activeCats: string[] = JSON.parse(saved);
-          if (activeCats.length > 0) return cats.filter(c => activeCats.includes(c.id));
-        } catch(e) {}
-      }
-    }
     return cats;
   }
 
   async updateName(id: string, newName: string): Promise<void> {
-    const { error } = await supabase.from('categories').update({ name: newName }).eq('id', id);
+    let query = supabase.from('categories').update({ name: newName }).eq('id', id);
+    query = this.isPersonal ? query.eq('user_id', this.userId) : query.is('user_id', null);
+    
+    const { error } = await query;
     if (error) throw new Error(error.message);
   }
 
   async updateBudget(id: string, newBudget: number): Promise<void> {
-    const { error } = await supabase.from('categories').update({ allocated_budget: newBudget }).eq('id', id);
+    let query = supabase.from('categories').update({ allocated_budget: newBudget }).eq('id', id);
+    query = this.isPersonal ? query.eq('user_id', this.userId) : query.is('user_id', null);
+    
+    const { error } = await query;
     if (error) throw new Error(error.message);
   }
 
   async delete(id: string): Promise<void> {
-    const { error } = await supabase.from('categories').delete().eq('id', id);
+    let query = supabase.from('categories').delete().eq('id', id);
+    query = this.isPersonal ? query.eq('user_id', this.userId) : query.is('user_id', null);
+    
+    const { error } = await query;
     if (error) throw new Error(error.message);
   }
 }

@@ -10,7 +10,6 @@ export function ExportCSVButton() {
   const { categoryRepo, spendRepo } = useAppStore();
   const [isExporting, setIsExporting] = useState(false);
 
-  // Retaining the successful ISO date format
   const formatForExcelDate = (date: Date | null | undefined) => {
     if (!date) return "";
     const d = String(date.getDate()).padStart(2, "0");
@@ -35,11 +34,8 @@ export function ExportCSVButton() {
       const spends = await spendRepo.findByDateRange(new Date(0), new Date("2100-01-01"));
 
       const catMap = new Map(categories.map(c => [c.id, c]));
-
-      // Sort natively by Date timestamp (Oldest to Newest)
       spends.sort((a, b) => a.date.getTime() - b.date.getTime());
 
-      // Passing pure, unformatted numbers and strings to PapaParse
       const rawData = spends.map(spend => {
         const category = catMap.get(spend.categoryId);
         const categoryName = category ? category.name : "Unknown Category";
@@ -47,6 +43,7 @@ export function ExportCSVButton() {
         const remainingAmount = spend.totalAmount - spend.amountPaid;
 
         return {
+          "Transaction ID": spend.id,
           "Item Name": spend.itemName,
           "Category": categoryName,
           "Category Budget": categoryBudget,
@@ -58,12 +55,7 @@ export function ExportCSVButton() {
         };
       });
 
-      // PapaParse handles all necessary escaping automatically
-      const csvString = Papa.unparse(rawData, {
-        header: true,
-      });
-
-      // UTF-8 BOM (\uFEFF) forces Excel to strictly parse formatting and special characters
+      const csvString = Papa.unparse(rawData, { header: true });
       const csvContent = "\uFEFF" + csvString;
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);

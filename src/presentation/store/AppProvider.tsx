@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { useSession, signOut } from "next-auth/react";
+import { usePathname } from "next/navigation";
 import { ICategoryRepository, ISpendRepository } from "../../domain/interfaces/repositories";
 import { SupabaseCategoryRepository } from "../../data/repositories/SupabaseCategoryRepository";
 import { SupabaseSpendRepository } from "../../data/repositories/SupabaseSpendRepository";
@@ -18,38 +19,51 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  // 1. Hook into NextAuth to read the secure browser cookie
   const { data: session, status } = useSession();
-
-  const [categoryRepo, setCategoryRepo] = useState<ICategoryRepository | null>(null);
-  const [spendRepo, setSpendRepo] = useState<ISpendRepository | null>(null);
-  const [isDbReady, setIsDbReady] = useState(false);
-
-  // 2. Derive state directly from NextAuth's secure backend validation
-  const isAuthenticated = status === "authenticated";
+  const pathname = usePathname();
   
-  // Extract the role from the token (defaults to "user" if undefined)
+  const [isDbReady, setIsDbReady] = useState(false);
+  const [repos, setRepos] = useState<{
+    companyCategory: ICategoryRepository | null,
+    companySpend: ISpendRepository | null,
+    personalCategory: ICategoryRepository | null,
+    personalSpend: ISpendRepository | null,
+  }>({
+    companyCategory: null, companySpend: null, personalCategory: null, personalSpend: null
+  });
+
+  const isAuthenticated = status === "authenticated";
   const userRole = (session?.user?.role as "admin" | "user") || "user";
+  
+  // Calculate Scope: If URL contains /personal, switch the entire app's database targeting
+  const appScope = pathname?.startsWith('/personal') ? "personal" : "company";
 
-  // 3. Supabase Initialization
   useEffect(() => {
-    // Supabase is cloud-hosted and instantly ready. 
-    // We instantiate the repositories immediately on mount.
-    setCategoryRepo(new SupabaseCategoryRepository());
-    setSpendRepo(new SupabaseSpendRepository());
-    setIsDbReady(true);
-  }, []);
+    if (status !== "loading") {
+      // Safely extract the UUID from the session (requires NextAuth callbacks to expose user.id)
+      const userId = (session?.user as any)?.id || null;
+      
+      setRepos({
+        companyCategory: new SupabaseCategoryRepository(false),
+        companySpend: new SupabaseSpendRepository(false),
+        personalCategory: new SupabaseCategoryRepository(true, userId),
+        personalSpend: new SupabaseSpendRepository(true, userId)
+      });
+      setIsDbReady(true);
+    }
+  }, [status, session]);
 
-  // 4. Secure Logout via NextAuth
   const logoutUser = async () => {
-    // This securely destroys the cookie and redirects the user to the root/login
     await signOut({ callbackUrl: "/" });
   };
 
+  const activeCategoryRepo = appScope === "company" ? repos.companyCategory : repos.personalCategory;
+  const activeSpendRepo = appScope === "company" ? repos.companySpend : repos.personalSpend;
+
   return (
     <AppContext.Provider value={{ 
-      categoryRepo, 
-      spendRepo, 
+      categoryRepo: activeCategoryRepo, 
+      spendRepo: activeSpendRepo, 
       isDbReady, 
       isAuthenticated, 
       logoutUser, 

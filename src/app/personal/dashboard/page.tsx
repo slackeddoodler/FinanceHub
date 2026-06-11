@@ -13,15 +13,16 @@ import { DashboardFilter } from "@/presentation/components/DashboardFilter";
 import { LockScreen } from "@/presentation/components/LockScreen";
 import { GlobalHeader } from "@/presentation/components/GlobalHeader";
 
-export default function DashboardPage() {
+export default function PersonalDashboardPage() {
   const { isDbReady, isAuthenticated } = useAppStore();
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
+  // CRITICAL FIX: Isolate Storage Keys to Personal Workspace
   const [filters, setFilters] = useState<DashboardFilters>(() => {
     let startDate = undefined;
     let endDate = undefined;
     if (typeof window !== "undefined") {
-      const saved = sessionStorage.getItem("financehub_date_filters");
+      const saved = sessionStorage.getItem("financehub_personal_date_filters");
       if (saved) {
         try {
           const p = JSON.parse(saved);
@@ -35,7 +36,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      sessionStorage.setItem("financehub_date_filters", JSON.stringify({
+      sessionStorage.setItem("financehub_personal_date_filters", JSON.stringify({
         startDate: filters.startDate ? filters.startDate.toISOString() : null,
         endDate: filters.endDate ? filters.endDate.toISOString() : null
       }));
@@ -49,9 +50,11 @@ export default function DashboardPage() {
 
   return (
     <main className="min-h-screen bg-background text-foreground p-8 space-y-6">
+      
+      {/* GLOBAL HEADER IS INJECTED HERE */}
       <GlobalHeader 
-        title="Company Analytics" 
-        subtitle="Shared financial insights." 
+        title="Personal Analytics" 
+        subtitle="Insights securely scoped to your account." 
         activePage="dashboard" 
         handleDataRefresh={handleDataRefresh} 
       />

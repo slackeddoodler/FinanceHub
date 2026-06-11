@@ -112,7 +112,8 @@ export function AddSpendDialog({ onSpendAdded }: { onSpendAdded: () => void }) {
         Number(amountPaid) || 0,
         finalDate,
         null,
-        finalDueDate
+        finalDueDate,
+        `TXN-${Date.now()}` // Generate sequential Transaction ID
       );
 
       await spendRepo.save(newSpend);
@@ -130,7 +131,6 @@ export function AddSpendDialog({ onSpendAdded }: { onSpendAdded: () => void }) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        {/* CRITICAL FIX: Updated text length ensures identical horizontal padding and symmetrical size with "+ New Category" */}
         <Button>+ Log Expense</Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-[425px]">

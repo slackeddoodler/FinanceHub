@@ -69,7 +69,8 @@ export function ImportCSVDialog({ onImported }: { onImported: () => void }) {
 
         const headers = parsed[0].map(h => h.toLowerCase());
         
-        // Flexible dynamic indexing to prevent breakage if CSV columns shift
+        // Flexible dynamic indexing
+        const txnIdIdx = headers.findIndex(h => h.includes("transaction id") || h === "txn id" || h === "id");
         const catIdx = headers.findIndex(h => h.includes("category name") || h === "category");
         const budgetIdx = headers.findIndex(h => h.includes("budget"));
         const itemIdx = headers.findIndex(h => h.includes("item name") || h === "item");
@@ -82,6 +83,8 @@ export function ImportCSVDialog({ onImported }: { onImported: () => void }) {
         if (catIdx === -1) throw new Error("Missing required column: Category Name");
 
         const existingCategories = await categoryRepo.findAll();
+        // Fetch existing database to perform duplicate verification
+        const existingSpends = await spendRepo.findByDateRange(new Date("2000-01-01"), new Date("2100-01-01"));
         let newTransactionsCount = 0;
 
         for (let i = 1; i < parsed.length; i++) {
@@ -92,7 +95,6 @@ export function ImportCSVDialog({ onImported }: { onImported: () => void }) {
           const rawBudget = budgetIdx !== -1 ? Number(row[budgetIdx]) : 0;
           const budget = isNaN(rawBudget) ? 0 : rawBudget;
 
-          // 1. Process the Category & Budget Restoration
           // 1. Process the Category & Budget Restoration
           let targetCatId = "";
           const existingCatIndex = existingCategories.findIndex(c => c.name.toLowerCase() === catName.toLowerCase());
@@ -118,23 +120,54 @@ export function ImportCSVDialog({ onImported }: { onImported: () => void }) {
             existingCategories.push(newCat); // Sync local memory array
           }
 
-          // 2. Process the Transaction (If the row isn't just an empty category backup)
+          // 2. Process the Transaction
           const itemName = itemIdx !== -1 ? row[itemIdx] : "";
           if (itemName) {
+            const txnIdStr = txnIdIdx !== -1 ? row[txnIdIdx].replace(/"/g, '').trim() : "";
             const desc = descIdx !== -1 ? row[descIdx] : null;
             const total = totalIdx !== -1 ? Number(row[totalIdx]) || 0 : 0;
             const paid = paidIdx !== -1 ? Number(row[paidIdx]) || 0 : 0;
             
+            // Robust date parsing for standard MM/DD/YYYY and exported Indian DD/MM/YYYY
             const dateStr = dateIdx !== -1 ? row[dateIdx] : "";
-            const date = dateStr ? new Date(dateStr) : new Date();
-            
+            let date = new Date();
+            if (dateStr) {
+              const parts = dateStr.split('/');
+              if (parts.length === 3 && parts[2].length === 4) {
+                date = new Date(`${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}T12:00:00Z`);
+              } else {
+                date = new Date(dateStr);
+              }
+            }
+
+            // === CRITICAL FIX: Strict Duplication Guard ===
+            const isDuplicate = existingSpends.some(s => {
+              const existingTxnId = s.transactionId || s.id;
+              
+              const matchesTxnId = txnIdStr !== "" && existingTxnId === txnIdStr;
+              const matchesName = s.itemName.toLowerCase() === itemName.trim().toLowerCase();
+              const matchesTotal = s.totalAmount === total;
+              // Use toLocaleDateString to bypass deep timezone offset disparities
+              const matchesDate = s.date.toLocaleDateString('en-IN') === date.toLocaleDateString('en-IN');
+
+              return matchesTxnId && matchesName && matchesTotal && matchesDate;
+            });
+
+            if (isDuplicate) {
+              continue; // Skip silently as requested
+            }
+            // ==============================================
+
             const lastDateStr = lastDateIdx !== -1 ? row[lastDateIdx] : "";
-            const lastDate = lastDateStr ? new Date(lastDateStr) : null;
+            const lastDate = lastDateStr && lastDateStr.toLowerCase() !== "not set" ? new Date(lastDateStr) : null;
+            
+            const finalTxnId = txnIdStr || `TXN-${Date.now()}${i}`;
 
             const newSpend = new SpendItem(
-              crypto.randomUUID(), targetCatId, itemName, desc, total, paid, date, null, lastDate
+              crypto.randomUUID(), targetCatId, itemName, desc, total, paid, date, null, lastDate, finalTxnId
             );
             await spendRepo.save(newSpend);
+            existingSpends.push(newSpend); // Prevent same-CSV internal duplication
             newTransactionsCount++;
           }
         }

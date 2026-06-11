@@ -8,7 +8,8 @@ export class SpendItem {
     public amountPaid: number,
     public date: Date,
     public billFileId?: string | null,
-    public lastDateOfPayment?: Date | null // CRITICAL FIX: Added new property
+    public lastDateOfPayment?: Date | null,
+    public transactionId?: string | null // NEW PROPERTY
   ) {}
 
   get pendingAmount(): number {
