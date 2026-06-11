@@ -34,28 +34,28 @@ export function WorkspaceSwitcher() {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        {/* PIXEL-PERFECT MATCH: Mimicking ModernSelect from AddSpendDialog exactly */}
+        {/* FIX 1: Expanded container width to w-[240px] to ensure ample breathing room */}
         <Button
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className="w-[200px] justify-between font-normal px-2 h-10 shrink-0"
+          className="w-[240px] justify-between font-normal px-3 h-10 shrink-0"
         >
-          <div className="flex items-center gap-2 truncate">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
             {activeWorkspace === "company" ? (
               <Building2 className="h-4 w-4 opacity-50 shrink-0" />
             ) : (
               <User className="h-4 w-4 opacity-50 shrink-0" />
             )}
-            <span className="truncate text-sm">
+            {/* FIX 2: Replaced 'truncate' with 'whitespace-nowrap' to absolutely forbid the browser from injecting ellipses */}
+            <span className="whitespace-nowrap text-sm text-left font-medium">
               {activeWorkspace === "company" ? "Company Workspace" : "Personal Workspace"}
             </span>
           </div>
-          <ChevronDown className="h-3 w-3 opacity-50 ml-1 shrink-0" />
+          <ChevronDown className="h-4 w-4 opacity-50 ml-2 shrink-0" />
         </Button>
       </PopoverTrigger>
       
-      {/* FLUSH ALIGNMENT: Forces exact width matching of the trigger box */}
       <PopoverContent className="p-1 shadow-lg" style={{ width: 'var(--radix-popover-trigger-width)' }} align="start">
         <div className="flex flex-col gap-0.5">
           <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
@@ -69,25 +69,25 @@ export function WorkspaceSwitcher() {
               activeWorkspace === "company" && "bg-primary/10 text-primary font-medium hover:bg-primary/10"
             )}
           >
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
               <Building2 className="h-4 w-4 shrink-0 opacity-70" />
-              <span className="truncate pr-4">Company Workspace</span>
+              <span className="truncate">Company Workspace</span>
             </div>
-            {activeWorkspace === "company" && <Check className="h-4 w-4 shrink-0" />}
+            {activeWorkspace === "company" && <Check className="h-4 w-4 shrink-0 ml-2" />}
           </div>
           
           <div
             onClick={() => handleSwitch("personal")}
             className={cn(
-              "flex items-center justify-between px-2 py-1.5 text-sm rounded-md cursor-pointer transition-colors hover:bg-muted",
+              "flex items-center justify-between px-2 py-1.5 text-sm rounded-sm cursor-pointer transition-colors hover:bg-muted",
               activeWorkspace === "personal" && "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 font-medium hover:bg-emerald-50 dark:hover:bg-emerald-500/10"
             )}
           >
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
               <User className="h-4 w-4 shrink-0 opacity-70" />
-              <span className="truncate pr-4">Personal Workspace</span>
+              <span className="truncate">Personal Workspace</span>
             </div>
-            {activeWorkspace === "personal" && <Check className="h-4 w-4 shrink-0" />}
+            {activeWorkspace === "personal" && <Check className="h-4 w-4 shrink-0 ml-2" />}
           </div>
           
         </div>

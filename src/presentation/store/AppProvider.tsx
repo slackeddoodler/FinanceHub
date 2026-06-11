@@ -1,11 +1,11 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { useSession, signOut } from "next-auth/react";
-import { usePathname } from "next/navigation";
-import { ICategoryRepository, ISpendRepository } from "../../domain/interfaces/repositories";
-import { SupabaseCategoryRepository } from "../../data/repositories/SupabaseCategoryRepository";
-import { SupabaseSpendRepository } from "../../data/repositories/SupabaseSpendRepository";
+import { usePathname, useRouter } from "next/navigation";
+import { ICategoryRepository, ISpendRepository } from "@/domain/interfaces/repositories";
+import { SupabaseCategoryRepository } from "@/data/repositories/SupabaseCategoryRepository";
+import { SupabaseSpendRepository } from "@/data/repositories/SupabaseSpendRepository";
+import { createClient } from "@/utils/supabase/client";
 
 interface AppContextType {
   categoryRepo: ICategoryRepository | null;
@@ -13,16 +13,20 @@ interface AppContextType {
   isDbReady: boolean;
   isAuthenticated: boolean;
   logoutUser: () => Promise<void>;
-  userRole: "admin" | "user";
+  userRole: "admin" | "editor" | "viewer";
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const { data: session, status } = useSession();
   const pathname = usePathname();
+  const router = useRouter();
+  const supabase = createClient();
   
   const [isDbReady, setIsDbReady] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [userRole, setUserRole] = useState<"admin" | "editor" | "viewer">("viewer");
+
   const [repos, setRepos] = useState<{
     companyCategory: ICategoryRepository | null,
     companySpend: ISpendRepository | null,
@@ -32,16 +36,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     companyCategory: null, companySpend: null, personalCategory: null, personalSpend: null
   });
 
-  const isAuthenticated = status === "authenticated";
-  const userRole = (session?.user?.role as "admin" | "user") || "user";
-  
-  // Calculate Scope: If URL contains /personal, switch the entire app's database targeting
   const appScope = pathname?.startsWith('/personal') ? "personal" : "company";
 
   useEffect(() => {
-    if (status !== "loading") {
-      // Safely extract the UUID from the session (requires NextAuth callbacks to expose user.id)
-      const userId = (session?.user as any)?.id || null;
+    const fetchRoleAndInit = async (session: any) => {
+      const userId = session?.user?.id || null;
+      setIsAuthenticated(!!session);
+      
+      if (userId) {
+        // Use maybeSingle() to safely handle users who might not have a role yet (prevents 406 errors)
+        const { data, error } = await supabase
+          .from('company_roles')
+          .select('role')
+          .eq('user_id', userId)
+          .maybeSingle();
+          
+        if (data && !error) {
+          setUserRole(data.role as "admin" | "editor" | "viewer");
+        } else {
+          setUserRole("viewer"); // Default fallback
+        }
+      } else {
+        setUserRole("viewer");
+      }
       
       setRepos({
         companyCategory: new SupabaseCategoryRepository(false),
@@ -49,12 +66,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         personalCategory: new SupabaseCategoryRepository(true, userId),
         personalSpend: new SupabaseSpendRepository(true, userId)
       });
+      
       setIsDbReady(true);
-    }
-  }, [status, session]);
+    };
+
+    // 1. Initial Check on Mount
+    supabase.auth.getSession().then(({ data: { session } }) => fetchRoleAndInit(session));
+
+    // 2. Real-time Listener (Catches logins, logouts, and OTP verifications)
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      fetchRoleAndInit(session);
+    });
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, [supabase]);
 
   const logoutUser = async () => {
-    await signOut({ callbackUrl: "/" });
+    await supabase.auth.signOut();
+    router.push("/");
   };
 
   const activeCategoryRepo = appScope === "company" ? repos.companyCategory : repos.personalCategory;
