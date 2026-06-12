@@ -6,9 +6,9 @@ import { useAppStore } from "@/presentation/store/AppProvider";
 import { GetTransactionsUseCase, TransactionDTO } from "@/domain/use-cases/GetTransactionsUseCase";
 import { Category } from "@/domain/entities/Category";
 import { formatINR } from "@/presentation/lib/currency";
-import { Filter, CalendarIcon, ChevronDown, Tags, ArrowUp, ArrowDown, ArrowUpDown, X, Check } from "lucide-react";
+import { Filter, CalendarIcon, ChevronDown, Tags, ArrowUp, ArrowDown, ArrowUpDown, X, Check, AlertCircle } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Label } from "@/components/ui/label";
@@ -260,6 +260,27 @@ export default function LedgerPage() {
   if (!isDbReady) return <DashboardSkeleton />;
   if (!isAuthenticated) return <LockScreen />;
 
+  if (userRole === "revoked" && !isPersonal) {
+    return (
+      <main className="min-h-screen bg-background p-8 flex flex-col">
+        <GlobalHeader title="Company Workspace" subtitle="Access Suspended" activePage="ledger" handleDataRefresh={() => {}} />
+        <div className="flex-1 flex items-center justify-center w-full mt-12">
+          <Card className="max-w-md w-full shadow-lg border-destructive/20">
+             <CardHeader className="text-center pb-2">
+               <AlertCircle className="h-12 w-12 text-destructive mx-auto mb-2" />
+               <CardTitle className="text-xl">Access Revoked</CardTitle>
+               <CardDescription>Your access to the company workspace has been suspended by an administrator.</CardDescription>
+             </CardHeader>
+             <CardContent className="text-center flex flex-col gap-4">
+               <p className="text-sm text-muted-foreground">You can still securely access your personal dashboard and transactions.</p>
+               <Button onClick={() => window.location.href = '/personal'} className="w-full">Go to Personal Workspace</Button>
+             </CardContent>
+          </Card>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-background text-foreground p-8 space-y-6">
       <GlobalHeader 
@@ -469,6 +490,8 @@ export default function LedgerPage() {
                     <TableHeader>
                       <TableRow className="bg-muted/10 hover:bg-muted/10">
                         <TableHead className="w-[40px] text-center px-2">#</TableHead>
+                        {/* CRITICAL FIX: The previously missing Txn ID Column */}
+                        <TableHead className="w-[100px] px-2 text-xs uppercase tracking-wider">Txn ID</TableHead>
                         <TableHead className="px-2">Item Name</TableHead>
                         
                         <TableHead className="text-right px-2 select-none cursor-pointer group/th" onClick={() => handleSort("totalAmount")}>
@@ -506,21 +529,26 @@ export default function LedgerPage() {
                           </div>
                         </TableHead>
                         
-                        {/* CRITICAL FIX: Conditionally remove the entire Action Column for Viewers */}
                         {canEdit && <TableHead className="w-[40px] px-2"></TableHead>}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {group.spends.length === 0 ? (
-                        <TableRow><TableCell colSpan={canEdit ? 8 : 7} className="text-center py-6 text-muted-foreground italic px-2">No transactions.</TableCell></TableRow>
+                        <TableRow><TableCell colSpan={canEdit ? 9 : 8} className="text-center py-6 text-muted-foreground italic px-2">No transactions.</TableCell></TableRow>
                       ) : (
                         group.spends.map((item, index) => (
                           <TableRow key={item.id}>
                             <TableCell className="text-center text-muted-foreground px-2">{index + 1}</TableCell>
                             
+                            {/* CRITICAL FIX: Modern rendering for the Txn ID */}
+                            <TableCell className="px-2">
+                              <div className="text-[10px] text-muted-foreground font-mono bg-muted/50 px-1.5 py-0.5 rounded w-fit border border-muted-foreground/10" title={item.transactionId || item.id}>
+                                {(item.transactionId || item.id).substring(0, 8)}
+                              </div>
+                            </TableCell>
+
                             <TableCell className="font-medium px-2">
                               <div className="flex items-center gap-2 group">
-                                {/* CRITICAL FIX: Hide Edit Name Action */}
                                 {canEdit && (
                                   <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200 shrink-0">
                                     <EditItemNameDialog transactionId={item.id} currentName={item.itemName} onUpdated={handleDataRefresh} />

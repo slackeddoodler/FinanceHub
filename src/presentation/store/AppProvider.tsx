@@ -6,6 +6,7 @@ import { ICategoryRepository, ISpendRepository } from "@/domain/interfaces/repos
 import { SupabaseCategoryRepository } from "@/data/repositories/SupabaseCategoryRepository";
 import { SupabaseSpendRepository } from "@/data/repositories/SupabaseSpendRepository";
 import { createClient } from "@/utils/supabase/client";
+import { Session, AuthChangeEvent } from "@supabase/supabase-js";
 
 interface AppContextType {
   categoryRepo: ICategoryRepository | null;
@@ -13,7 +14,8 @@ interface AppContextType {
   isDbReady: boolean;
   isAuthenticated: boolean;
   logoutUser: () => Promise<void>;
-  userRole: "admin" | "editor" | "viewer";
+  userRole: "admin" | "editor" | "viewer" | "revoked";
+  isPrimaryOwner: boolean;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -21,11 +23,15 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const supabase = createClient();
+  
+  // CRITICAL FIX 1: Lazy-initialize the client to prevent the infinite render loop and SSL crash
+  const [supabase] = useState(() => createClient());
   
   const [isDbReady, setIsDbReady] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [userRole, setUserRole] = useState<"admin" | "editor" | "viewer">("viewer");
+  
+  const [userRole, setUserRole] = useState<"admin" | "editor" | "viewer" | "revoked">("viewer");
+  const [isPrimaryOwner, setIsPrimaryOwner] = useState(false);
 
   const [repos, setRepos] = useState<{
     companyCategory: ICategoryRepository | null,
@@ -39,27 +45,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const appScope = pathname?.startsWith('/personal') ? "personal" : "company";
 
   useEffect(() => {
-    const fetchRoleAndInit = async (session: any) => {
+    const fetchRoleAndInit = async (session: Session | null) => {
       const userId = session?.user?.id || null;
       setIsAuthenticated(!!session);
       
       if (userId) {
-        // Use maybeSingle() to safely handle users who might not have a role yet (prevents 406 errors)
         const { data, error } = await supabase
           .from('company_roles')
-          .select('role')
+          .select('role, is_primary_owner')
           .eq('user_id', userId)
           .maybeSingle();
           
         if (data && !error) {
-          setUserRole(data.role as "admin" | "editor" | "viewer");
+          setUserRole(data.role as "admin" | "editor" | "viewer" | "revoked");
+          setIsPrimaryOwner(data.is_primary_owner);
         } else {
-          setUserRole("viewer"); // Default fallback
+          setUserRole("viewer");
+          setIsPrimaryOwner(false);
         }
       } else {
         setUserRole("viewer");
+        setIsPrimaryOwner(false);
       }
       
+      // CRITICAL FIX 2: Restored `userId` to correctly bypass the internal repository fail-safe
       setRepos({
         companyCategory: new SupabaseCategoryRepository(false),
         companySpend: new SupabaseSpendRepository(false),
@@ -70,18 +79,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setIsDbReady(true);
     };
 
-    // 1. Initial Check on Mount
-    supabase.auth.getSession().then(({ data: { session } }) => fetchRoleAndInit(session));
+    supabase.auth.getSession().then((response: { data: { session: Session | null } }) => fetchRoleAndInit(response.data.session));
 
-    // 2. Real-time Listener (Catches logins, logouts, and OTP verifications)
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
       fetchRoleAndInit(session);
     });
 
-    return () => {
-      authListener.subscription.unsubscribe();
-    };
-  }, [supabase]);
+    return () => authListener.subscription.unsubscribe();
+  }, [supabase]); // Safe to use in dependency array now because `supabase` is memoized by useState
 
   const logoutUser = async () => {
     await supabase.auth.signOut();
@@ -98,7 +103,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       isDbReady, 
       isAuthenticated, 
       logoutUser, 
-      userRole 
+      userRole,
+      isPrimaryOwner
     }}>
       {children}
     </AppContext.Provider>

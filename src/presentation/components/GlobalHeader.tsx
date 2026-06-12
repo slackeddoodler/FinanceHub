@@ -6,6 +6,8 @@ import { useAppStore } from "@/presentation/store/AppProvider";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 import { ImportCSVDialog } from "./ImportCSVDialog";
 import { ExportCSVButton } from "./ExportCSVButton";
+import { BackupDBButton } from "./BackupDBButton";
+import { RestoreDBDialog } from "./RestoreDBDialog";
 import { AddSpendDialog } from "./AddSpendDialog";
 import { AddCategoryDialog } from "./AddCategoryDialog";
 import { ThemeToggle } from "./ThemeToggle";
@@ -50,21 +52,9 @@ function DataManagementDropdown({ activePage, onImported }: { activePage: string
             Database
           </div>
           
-          <div className="flex flex-col gap-0.5">
-            <div 
-              onClick={() => { backupDatabase(); setOpen(false); }}
-              className="flex items-center justify-start px-2 py-1.5 text-sm font-normal rounded-sm cursor-pointer hover:bg-muted transition-colors"
-            >
-              <Save className="h-4 w-4 mr-2 opacity-70" />
-              <span className="truncate">Backup DB</span>
-            </div>
-            <div 
-              onClick={() => { console.warn("Restore Logic execution triggered."); setOpen(false); }}
-              className="flex items-center justify-start px-2 py-1.5 text-sm font-normal rounded-sm cursor-pointer hover:bg-muted transition-colors"
-            >
-              <UploadCloud className="h-4 w-4 mr-2 opacity-70" />
-              <span className="truncate">Restore DB</span>
-            </div>
+          <div className={cn("flex flex-col gap-0.5", overrideClasses)}>
+            <BackupDBButton onBackupComplete={() => setOpen(false)} />
+            <RestoreDBDialog onRestored={() => { onImported(); setOpen(false); }} />
           </div>
 
           {activePage === "dashboard" && (
@@ -111,6 +101,9 @@ export function GlobalHeader({ title, subtitle, activePage, handleDataRefresh }:
   // Only Admins looking at the Company Workspace can see the Team tab.
   const isAdmin = !isPersonal && userRole === "admin";
 
+  // CRITICAL FIX: Ensures Write actions (like Log Expense) are hidden when on the team page
+  const showWriteActions = canEdit && activePage !== "team";
+
   const navTo = (page: string) => {
     const base = isPersonal ? "/personal" : "";
     if (page === "ledger") router.push(base || "/");
@@ -156,8 +149,8 @@ export function GlobalHeader({ title, subtitle, activePage, handleDataRefresh }:
           )}
         </nav>
         
-        {/* RBAC: Conditional Write Actions (Hidden for Viewers) */}
-        {canEdit && (
+        {/* CRITICAL FIX: Replaced `canEdit` with `showWriteActions` */}
+        {showWriteActions && (
           <>
             <div className="hidden sm:block w-px h-6 bg-border mx-1 shrink-0" />
             <DataManagementDropdown activePage={activePage} onImported={handleDataRefresh} />

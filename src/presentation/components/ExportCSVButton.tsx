@@ -43,7 +43,8 @@ export function ExportCSVButton() {
         const remainingAmount = spend.totalAmount - spend.amountPaid;
 
         return {
-          "Transaction ID": spend.id,
+          // CRITICAL FIX: Prioritize original Transaction ID to prevent duplication cycles
+          "Transaction ID": spend.transactionId || spend.id,
           "Item Name": spend.itemName,
           "Category": categoryName,
           "Category Budget": categoryBudget,

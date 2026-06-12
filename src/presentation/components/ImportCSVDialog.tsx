@@ -47,8 +47,11 @@ export function ImportCSVDialog({ onImported }: { onImported: () => void }) {
   const { categoryRepo, spendRepo } = useAppStore();
   const [isOpen, setIsOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -58,6 +61,7 @@ export function ImportCSVDialog({ onImported }: { onImported: () => void }) {
     setIsProcessing(true);
     setError(null);
     setSuccess(null);
+    setWarning(null);
 
     const reader = new FileReader();
     reader.onload = async (event) => {
@@ -69,7 +73,6 @@ export function ImportCSVDialog({ onImported }: { onImported: () => void }) {
 
         const headers = parsed[0].map(h => h.toLowerCase());
         
-        // Flexible dynamic indexing
         const txnIdIdx = headers.findIndex(h => h.includes("transaction id") || h === "txn id" || h === "id");
         const catIdx = headers.findIndex(h => h.includes("category name") || h === "category");
         const budgetIdx = headers.findIndex(h => h.includes("budget"));
@@ -83,52 +86,51 @@ export function ImportCSVDialog({ onImported }: { onImported: () => void }) {
         if (catIdx === -1) throw new Error("Missing required column: Category Name");
 
         const existingCategories = await categoryRepo.findAll();
-        // Fetch existing database to perform duplicate verification
         const existingSpends = await spendRepo.findByDateRange(new Date("2000-01-01"), new Date("2100-01-01"));
+        
         let newTransactionsCount = 0;
+        let skippedDuplicatesCount = 0;
+        let synchronizedCategoriesCount = 0;
 
         for (let i = 1; i < parsed.length; i++) {
           const row = parsed[i];
           const catName = row[catIdx];
-          if (!catName) continue; // Skip entirely blank rows
+          if (!catName) continue;
           
           const rawBudget = budgetIdx !== -1 ? Number(row[budgetIdx]) : 0;
           const budget = isNaN(rawBudget) ? 0 : rawBudget;
 
-          // 1. Process the Category & Budget Restoration
           let targetCatId = "";
           const existingCatIndex = existingCategories.findIndex(c => c.name.toLowerCase() === catName.toLowerCase());
           const existingCat = existingCategories[existingCatIndex];
           
           if (existingCat) {
             targetCatId = existingCat.id;
-            // Backup restoration: Update existing budget if the CSV dictates a new one
             if (budgetIdx !== -1 && existingCat.allocatedBudget !== budget) {
               await categoryRepo.updateBudget(targetCatId, budget);
-              // CRITICAL FIX: Respect readonly immutability by replacing the object instance entirely
               existingCategories[existingCatIndex] = new Category(
                 existingCat.id,
                 existingCat.name,
                 budget,
                 existingCat.createdAt
               );
+              synchronizedCategoriesCount++;
             }
           } else {
             targetCatId = crypto.randomUUID();
             const newCat = new Category(targetCatId, catName, budget, new Date());
             await categoryRepo.save(newCat);
-            existingCategories.push(newCat); // Sync local memory array
+            existingCategories.push(newCat); 
+            synchronizedCategoriesCount++;
           }
 
-          // 2. Process the Transaction
           const itemName = itemIdx !== -1 ? row[itemIdx] : "";
           if (itemName) {
-            const txnIdStr = txnIdIdx !== -1 ? row[txnIdIdx].replace(/"/g, '').trim() : "";
+            const txnIdStr = txnIdIdx !== -1 ? row[txnIdIdx].replace(/"/g, '').replace(/^\uFEFF/, '').trim() : "";
             const desc = descIdx !== -1 ? row[descIdx] : null;
             const total = totalIdx !== -1 ? Number(row[totalIdx]) || 0 : 0;
             const paid = paidIdx !== -1 ? Number(row[paidIdx]) || 0 : 0;
             
-            // Robust date parsing for standard MM/DD/YYYY and exported Indian DD/MM/YYYY
             const dateStr = dateIdx !== -1 ? row[dateIdx] : "";
             let date = new Date();
             if (dateStr) {
@@ -140,23 +142,27 @@ export function ImportCSVDialog({ onImported }: { onImported: () => void }) {
               }
             }
 
-            // === CRITICAL FIX: Strict Duplication Guard ===
             const isDuplicate = existingSpends.some(s => {
               const existingTxnId = s.transactionId || s.id;
               
-              const matchesTxnId = txnIdStr !== "" && existingTxnId === txnIdStr;
+              if (txnIdStr !== "" && existingTxnId === txnIdStr) {
+                return true; 
+              }
+              
               const matchesName = s.itemName.toLowerCase() === itemName.trim().toLowerCase();
               const matchesTotal = s.totalAmount === total;
-              // Use toLocaleDateString to bypass deep timezone offset disparities
-              const matchesDate = s.date.toLocaleDateString('en-IN') === date.toLocaleDateString('en-IN');
+              
+              const sDateStr = s.date.toISOString().split('T')[0];
+              const importDateStr = !isNaN(date.getTime()) ? date.toISOString().split('T')[0] : "";
+              const matchesDate = sDateStr === importDateStr;
 
-              return matchesTxnId && matchesName && matchesTotal && matchesDate;
+              return matchesName && matchesTotal && matchesDate;
             });
 
             if (isDuplicate) {
-              continue; // Skip silently as requested
+              skippedDuplicatesCount++;
+              continue; 
             }
-            // ==============================================
 
             const lastDateStr = lastDateIdx !== -1 ? row[lastDateIdx] : "";
             const lastDate = lastDateStr && lastDateStr.toLowerCase() !== "not set" ? new Date(lastDateStr) : null;
@@ -167,14 +173,42 @@ export function ImportCSVDialog({ onImported }: { onImported: () => void }) {
               crypto.randomUUID(), targetCatId, itemName, desc, total, paid, date, null, lastDate, finalTxnId
             );
             await spendRepo.save(newSpend);
-            existingSpends.push(newSpend); // Prevent same-CSV internal duplication
+            existingSpends.push(newSpend); 
             newTransactionsCount++;
           }
         }
 
-        setSuccess(`Successfully synchronized categories and imported ${newTransactionsCount} transactions.`);
-        onImported();
-        setTimeout(() => setIsOpen(false), 2000);
+        // --- DYNAMIC & FACTUAL MESSAGE ENGINE ---
+        let resultMessage = "";
+        let isWarningState = false;
+
+        if (newTransactionsCount > 0) {
+          resultMessage = `Imported ${newTransactionsCount} transaction(s). `;
+          if (skippedDuplicatesCount > 0) resultMessage += `Skipped ${skippedDuplicatesCount} duplicate(s).`;
+        } else if (skippedDuplicatesCount > 0) {
+          resultMessage = `No new transactions imported. Safely skipped ${skippedDuplicatesCount} exact duplicate(s).`;
+          isWarningState = true;
+        } else if (synchronizedCategoriesCount > 0) {
+          resultMessage = `Synchronized ${synchronizedCategoriesCount} category/categories. No transactions found.`;
+        } else {
+          resultMessage = "No new data or transactions found in the CSV.";
+          isWarningState = true;
+        }
+
+        if (isWarningState) {
+          setWarning(resultMessage);
+        } else {
+          setSuccess(resultMessage);
+        }
+
+        // --- CRITICAL UNMOUNT FIX ---
+        // Delay calling onImported(). If called immediately, the parent popover unmounts 
+        // the dialog, preventing the user from ever seeing the message above!
+        setTimeout(() => {
+          setIsOpen(false);
+          onImported();
+        }, 4000);
+
       } catch (err: any) {
         setError(err.message || "Failed to parse CSV file.");
       } finally {
@@ -186,11 +220,11 @@ export function ImportCSVDialog({ onImported }: { onImported: () => void }) {
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => { setIsOpen(open); if(!open) { setError(null); setSuccess(null); } }}>
+    <Dialog open={isOpen} onOpenChange={(open) => { setIsOpen(open); if(!open) { setError(null); setSuccess(null); setWarning(null); } }}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="flex items-center space-x-2 h-9 bg-background">
-          <Upload className="h-4 w-4" />
-          <span>Import CSV</span>
+        <Button variant="outline" size="sm" className="flex items-center space-x-2 h-9 bg-background w-full justify-start border-none shadow-none text-xs font-normal px-2 py-1.5 hover:bg-muted rounded-sm">
+          <Upload className="h-4 w-4 opacity-70" />
+          <span className="truncate">Import CSV</span>
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-[425px]">
@@ -211,6 +245,13 @@ export function ImportCSVDialog({ onImported }: { onImported: () => void }) {
           {error && (
             <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 p-3 rounded-md">
               <AlertCircle className="h-4 w-4 shrink-0" /><span>{error}</span>
+            </div>
+          )}
+
+          {/* New Warning state for displaying accurate duplicate skips */}
+          {warning && (
+            <div className="flex items-center gap-2 text-sm text-amber-600 bg-amber-50 p-3 rounded-md dark:bg-amber-950/50 dark:text-amber-400">
+              <AlertCircle className="h-4 w-4 shrink-0" /><span>{warning}</span>
             </div>
           )}
           

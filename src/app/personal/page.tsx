@@ -471,6 +471,8 @@ export default function PersonalLedgerPage() {
                     <TableHeader>
                       <TableRow className="bg-muted/10 hover:bg-muted/10">
                         <TableHead className="w-[40px] text-center px-2">#</TableHead>
+                        {/* CRITICAL FIX: The previously missing Txn ID Column */}
+                        <TableHead className="w-[100px] px-2 text-xs uppercase tracking-wider">Txn ID</TableHead>
                         <TableHead className="px-2">Item Name</TableHead>
                         
                         <TableHead className="text-right px-2 select-none cursor-pointer group/th" onClick={() => handleSort("totalAmount")}>
@@ -520,6 +522,12 @@ export default function PersonalLedgerPage() {
                           <TableRow key={item.id}>
                             <TableCell className="text-center text-muted-foreground px-2">{index + 1}</TableCell>
                             
+                            <TableCell className="px-2">
+                              <div className="text-[10px] text-muted-foreground font-mono bg-muted/50 px-1.5 py-0.5 rounded w-fit border border-muted-foreground/10" title={item.transactionId || item.id}>
+                                {(item.transactionId || item.id).substring(0, 8)}
+                              </div>
+                            </TableCell>
+
                             <TableCell className="font-medium px-2">
                               <div className="flex items-center gap-2 group">
                                 {/* CRITICAL FIX: Hide Edit Actions */}
