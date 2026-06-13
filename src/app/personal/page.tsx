@@ -66,7 +66,6 @@ export default function PersonalLedgerPage() {
   const pathname = usePathname();
   const { isDbReady, isAuthenticated, spendRepo, categoryRepo, userRole } = useAppStore();
   
-  // --- RBAC PERMISSION CHECK ---
   const isPersonal = pathname?.startsWith("/personal");
   const canEdit = isPersonal || userRole === "admin" || userRole === "editor";
   
@@ -190,9 +189,31 @@ export default function PersonalLedgerPage() {
   }, [data, activeCats, activeStart, activeEnd, activeFilterType]);
 
   const groupedCategories = useMemo(() => {
-    const visibleCats = activeCats.length === 0 ? categories : categories.filter(c => activeCats.includes(c.id));
+    const knownCategoryIds = new Set(categories.map(c => c.id));
+    const hasOrphaned = filteredData.some(item => !knownCategoryIds.has(item.categoryId));
+
+    const allCategories = [...categories];
+
+    // Safely inject synthetic category so orphaned DB items do not silently drop
+    if (hasOrphaned) {
+      allCategories.push({
+        id: "uncategorized",
+        name: "Uncategorized Transactions",
+        allocatedBudget: 0,
+        userId: null,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      } as Category);
+    }
+
+    const visibleCats = activeCats.length === 0 ? allCategories : allCategories.filter(c => activeCats.includes(c.id));
+
     return visibleCats.map(cat => {
-      const catSpends = filteredData.filter(item => item.categoryId === cat.id);
+      const catSpends = filteredData.filter(item =>
+        cat.id === "uncategorized"
+          ? !knownCategoryIds.has(item.categoryId)
+          : item.categoryId === cat.id
+      );
       
       catSpends.sort((a, b) => {
         let valA: any = a[sortField];
@@ -215,7 +236,7 @@ export default function PersonalLedgerPage() {
       return {
         ...cat,
         spends: catSpends,
-        remainingBudget: cat.allocatedBudget - totalCommitted,
+        remainingBudget: (cat.allocatedBudget || 0) - totalCommitted,
       };
     });
   }, [categories, filteredData, activeCats, sortField, sortDirection]);
@@ -446,8 +467,8 @@ export default function PersonalLedgerPage() {
                   <div className="flex items-center gap-3">
                     <CardTitle className="text-xl">{group.name}</CardTitle>
                     <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center gap-1">
-                      {/* CRITICAL FIX: Wrap Category Actions */}
-                      {canEdit && (
+                      {/* CRITICAL FIX: Hide Edit/Delete for Synthetic Category */}
+                      {canEdit && group.id !== "uncategorized" && (
                         <>
                           <EditCategoryDialog category={group} onUpdated={handleDataRefresh} />
                           <DeleteCategoryDialog 
@@ -471,7 +492,6 @@ export default function PersonalLedgerPage() {
                     <TableHeader>
                       <TableRow className="bg-muted/10 hover:bg-muted/10">
                         <TableHead className="w-[40px] text-center px-2">#</TableHead>
-                        {/* CRITICAL FIX: The previously missing Txn ID Column */}
                         <TableHead className="w-[100px] px-2 text-xs uppercase tracking-wider">Txn ID</TableHead>
                         <TableHead className="px-2">Item Name</TableHead>
                         
@@ -510,7 +530,6 @@ export default function PersonalLedgerPage() {
                           </div>
                         </TableHead>
                         
-                        {/* CRITICAL FIX: Hide action header conditionally */}
                         {canEdit && <TableHead className="w-[40px] px-2"></TableHead>}
                       </TableRow>
                     </TableHeader>
@@ -530,7 +549,6 @@ export default function PersonalLedgerPage() {
 
                             <TableCell className="font-medium px-2">
                               <div className="flex items-center gap-2 group">
-                                {/* CRITICAL FIX: Hide Edit Actions */}
                                 {canEdit && (
                                   <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200 shrink-0">
                                     <EditItemNameDialog transactionId={item.id} currentName={item.itemName} onUpdated={handleDataRefresh} />
@@ -590,7 +608,6 @@ export default function PersonalLedgerPage() {
                               </div>
                             </TableCell>
                             
-                            {/* CRITICAL FIX: Hide Delete Column */}
                             {canEdit && (
                               <TableCell className="text-right px-2 pl-4">
                                 <DeleteSpendItemDialog transactionId={item.id} itemName={item.itemName} onDeleted={handleDataRefresh} />

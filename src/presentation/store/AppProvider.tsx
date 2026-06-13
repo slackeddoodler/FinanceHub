@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useState, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { ICategoryRepository, ISpendRepository } from "@/domain/interfaces/repositories";
 import { SupabaseCategoryRepository } from "@/data/repositories/SupabaseCategoryRepository";
@@ -24,8 +24,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   
-  // CRITICAL FIX 1: Lazy-initialize the client to prevent the infinite render loop and SSL crash
   const [supabase] = useState(() => createClient());
+  
+  // Sequence lock to prevent overlapping async auth events from overwriting state
+  const initLock = useRef(0);
   
   const [isDbReady, setIsDbReady] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -45,10 +47,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const appScope = pathname?.startsWith('/personal') ? "personal" : "company";
 
   useEffect(() => {
-    const fetchRoleAndInit = async (session: Session | null) => {
+    const fetchRoleAndInit = async (session: Session | null, sequenceId: number) => {
       const userId = session?.user?.id || null;
-      setIsAuthenticated(!!session);
       
+      let role: "admin" | "editor" | "viewer" | "revoked" = "viewer";
+      let isOwner = false;
+
       if (userId) {
         const { data, error } = await supabase
           .from('company_roles')
@@ -57,18 +61,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           .maybeSingle();
           
         if (data && !error) {
-          setUserRole(data.role as "admin" | "editor" | "viewer" | "revoked");
-          setIsPrimaryOwner(data.is_primary_owner);
-        } else {
-          setUserRole("viewer");
-          setIsPrimaryOwner(false);
+          role = data.role as any;
+          isOwner = data.is_primary_owner;
         }
-      } else {
-        setUserRole("viewer");
-        setIsPrimaryOwner(false);
       }
       
-      // CRITICAL FIX 2: Restored `userId` to correctly bypass the internal repository fail-safe
+      // CRITICAL FIX: If a newer auth event fired while we were awaiting the DB, 
+      // discard this stale result to prevent overwriting the correct state.
+      if (initLock.current !== sequenceId) return;
+      
+      // CRITICAL FIX: Batch state updates. 
+      // Repositories MUST be updated at the exact same time as isAuthenticated
+      // to guarantee the UI never renders a protected route with a null-userId repository.
       setRepos({
         companyCategory: new SupabaseCategoryRepository(false),
         companySpend: new SupabaseSpendRepository(false),
@@ -76,17 +80,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         personalSpend: new SupabaseSpendRepository(true, userId)
       });
       
+      setUserRole(role);
+      setIsPrimaryOwner(isOwner);
+      setIsAuthenticated(!!session);
       setIsDbReady(true);
     };
 
-    supabase.auth.getSession().then((response: { data: { session: Session | null } }) => fetchRoleAndInit(response.data.session));
+    // Track the current sequence to handle the initial session
+    const initialSequenceId = ++initLock.current;
+    supabase.auth.getSession().then(({ data }: { data: { session: Session | null } }) => fetchRoleAndInit(data.session, initialSequenceId));
 
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
-      fetchRoleAndInit(session);
+    const { data: authListener } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
+      // Track the current sequence to handle subsequent login/logout events
+      const nextSequenceId = ++initLock.current;
+      fetchRoleAndInit(session, nextSequenceId);
     });
 
-    return () => authListener.subscription.unsubscribe();
-  }, [supabase]); // Safe to use in dependency array now because `supabase` is memoized by useState
+    return () => {
+      initLock.current++; // Invalidate any pending async operations on unmount
+      authListener.subscription.unsubscribe();
+    };
+  }, [supabase]);
 
   const logoutUser = async () => {
     await supabase.auth.signOut();

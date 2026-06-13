@@ -6,9 +6,9 @@ import { useAppStore } from "@/presentation/store/AppProvider";
 import { GetTransactionsUseCase, TransactionDTO } from "@/domain/use-cases/GetTransactionsUseCase";
 import { Category } from "@/domain/entities/Category";
 import { formatINR } from "@/presentation/lib/currency";
-import { Filter, CalendarIcon, ChevronDown, Tags, ArrowUp, ArrowDown, ArrowUpDown, X, Check, AlertCircle } from "lucide-react";
+import { Filter, CalendarIcon, ChevronDown, Tags, ArrowUp, ArrowDown, ArrowUpDown, X, Check } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Label } from "@/components/ui/label";
@@ -62,11 +62,10 @@ function ModernSelect({ value, onValueChange, options, placeholder, className }:
   );
 }
 
-export default function LedgerPage() {
+export default function PersonalLedgerPage() {
   const pathname = usePathname();
   const { isDbReady, isAuthenticated, spendRepo, categoryRepo, userRole } = useAppStore();
   
-  // --- RBAC PERMISSION CHECK ---
   const isPersonal = pathname?.startsWith("/personal");
   const canEdit = isPersonal || userRole === "admin" || userRole === "editor";
   
@@ -78,7 +77,7 @@ export default function LedgerPage() {
   
   const [activeStart, setActiveStart] = useState<Date | undefined>(() => {
     if (typeof window !== "undefined") {
-      const saved = sessionStorage.getItem("financehub_date_filters");
+      const saved = sessionStorage.getItem("financehub_personal_date_filters");
       if (saved) { try { const p = JSON.parse(saved); if (p.startDate) return new Date(p.startDate); } catch(e){} }
     }
     return undefined;
@@ -86,7 +85,7 @@ export default function LedgerPage() {
 
   const [activeEnd, setActiveEnd] = useState<Date | undefined>(() => {
     if (typeof window !== "undefined") {
-      const saved = sessionStorage.getItem("financehub_date_filters");
+      const saved = sessionStorage.getItem("financehub_personal_date_filters");
       if (saved) { try { const p = JSON.parse(saved); if (p.endDate) return new Date(p.endDate); } catch(e){} }
     }
     return undefined;
@@ -94,7 +93,7 @@ export default function LedgerPage() {
 
   const [activeFilterType, setActiveFilterType] = useState<"date" | "lastDateOfPayment">(() => {
     if (typeof window !== "undefined") {
-      const saved = sessionStorage.getItem("financehub_date_filters");
+      const saved = sessionStorage.getItem("financehub_personal_date_filters");
       if (saved) { try { const p = JSON.parse(saved); if (p.filterType) return p.filterType; } catch(e){} }
     }
     return "date";
@@ -106,7 +105,7 @@ export default function LedgerPage() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      sessionStorage.setItem("financehub_date_filters", JSON.stringify({
+      sessionStorage.setItem("financehub_personal_date_filters", JSON.stringify({
         startDate: activeStart ? activeStart.toISOString() : null,
         endDate: activeEnd ? activeEnd.toISOString() : null,
         filterType: activeFilterType
@@ -116,7 +115,7 @@ export default function LedgerPage() {
 
   useEffect(() => {
     if (isFilterOpen && typeof window !== "undefined") {
-      const saved = sessionStorage.getItem("financehub_date_filters");
+      const saved = sessionStorage.getItem("financehub_personal_date_filters");
       if (saved) {
         try {
           const p = JSON.parse(saved);
@@ -134,11 +133,21 @@ export default function LedgerPage() {
   
   const [activeCats, setActiveCats] = useState<string[]>(() => {
     if (typeof window !== "undefined") {
-      const saved = sessionStorage.getItem("financehub_active_cats");
+      const saved = sessionStorage.getItem("financehub_personal_active_cats");
       if (saved) { try { return JSON.parse(saved); } catch(e){} }
     }
     return [];
   });
+
+  // Self-cleaning filter state: Prevent ghost categories from hiding orphaned transactions
+  useEffect(() => {
+    if (categories.length > 0 && activeCats.length > 0) {
+      const knownIds = new Set(categories.map(c => String(c.id)));
+      if (activeCats.some(id => !knownIds.has(String(id)))) {
+        setActiveCats(prev => prev.filter(id => knownIds.has(String(id))));
+      }
+    }
+  }, [categories, activeCats]);
   
   const [isStartOpen, setIsStartOpen] = useState(false);
   const [isEndOpen, setIsEndOpen] = useState(false);
@@ -148,7 +157,7 @@ export default function LedgerPage() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      sessionStorage.setItem("financehub_active_cats", JSON.stringify(activeCats));
+      sessionStorage.setItem("financehub_personal_active_cats", JSON.stringify(activeCats));
     }
   }, [activeCats]);
 
@@ -169,6 +178,7 @@ export default function LedgerPage() {
 
   const filteredData = useMemo(() => {
     return data.filter(item => {
+      // Intentionally lenient here to capture everything; strict categorization handled below.
       let matchesCat = activeCats.length === 0 || activeCats.includes(item.categoryId);
       
       const targetDate = item[activeFilterType];
@@ -190,9 +200,36 @@ export default function LedgerPage() {
   }, [data, activeCats, activeStart, activeEnd, activeFilterType]);
 
   const groupedCategories = useMemo(() => {
-    const visibleCats = activeCats.length === 0 ? categories : categories.filter(c => activeCats.includes(c.id));
+    const knownCategoryIds = new Set(categories.map(c => String(c.id)));
+    const allCategories = [...categories];
+
+    // Find any transaction lacking a mapped category (due to deletion or import mismatch)
+    const orphanedSpends = filteredData.filter(item => 
+      !item.categoryId || !knownCategoryIds.has(String(item.categoryId))
+    );
+
+    if (orphanedSpends.length > 0) {
+      allCategories.push({
+        id: "uncategorized",
+        name: "Uncategorized / Deleted Category",
+        allocatedBudget: 0,
+        userId: null,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      } as Category);
+    }
+
+    const activeSet = new Set(activeCats.map(id => String(id)));
+    
+    // Force "Uncategorized" to render regardless of filters if orphaned items exist
+    const visibleCats = activeSet.size === 0 
+      ? allCategories 
+      : allCategories.filter(c => activeSet.has(String(c.id)) || (c.id === "uncategorized" && orphanedSpends.length > 0));
+
     return visibleCats.map(cat => {
-      const catSpends = filteredData.filter(item => item.categoryId === cat.id);
+      const catSpends = cat.id === "uncategorized"
+        ? orphanedSpends
+        : filteredData.filter(item => String(item.categoryId) === String(cat.id));
       
       catSpends.sort((a, b) => {
         let valA: any = a[sortField];
@@ -215,9 +252,9 @@ export default function LedgerPage() {
       return {
         ...cat,
         spends: catSpends,
-        remainingBudget: cat.allocatedBudget - totalCommitted,
+        remainingBudget: (cat.allocatedBudget || 0) - totalCommitted,
       };
-    });
+    }).filter(cat => cat.spends.length > 0 || (cat.id !== "uncategorized" && activeSet.size === 0));
   }, [categories, filteredData, activeCats, sortField, sortDirection]);
 
   const handleSort = (field: SortableFields) => {
@@ -260,38 +297,19 @@ export default function LedgerPage() {
   if (!isDbReady) return <DashboardSkeleton />;
   if (!isAuthenticated) return <LockScreen />;
 
-  if (userRole === "revoked" && !isPersonal) {
-    return (
-      <main className="min-h-screen bg-background p-8 flex flex-col">
-        <GlobalHeader title="Company Workspace" subtitle="Access Suspended" activePage="ledger" handleDataRefresh={() => {}} />
-        <div className="flex-1 flex items-center justify-center w-full mt-12">
-          <Card className="max-w-md w-full shadow-lg border-destructive/20">
-             <CardHeader className="text-center pb-2">
-               <AlertCircle className="h-12 w-12 text-destructive mx-auto mb-2" />
-               <CardTitle className="text-xl">Access Revoked</CardTitle>
-               <CardDescription>Your access to the company workspace has been suspended by an administrator.</CardDescription>
-             </CardHeader>
-             <CardContent className="text-center flex flex-col gap-4">
-               <p className="text-sm text-muted-foreground">You can still securely access your personal dashboard and transactions.</p>
-               <Button onClick={() => window.location.href = '/personal'} className="w-full">Go to Personal Workspace</Button>
-             </CardContent>
-          </Card>
-        </div>
-      </main>
-    );
-  }
-
   return (
     <main className="min-h-screen bg-background text-foreground p-8 space-y-6">
+      
       <GlobalHeader 
-        title="Company Ledger" 
-        subtitle="Shared corporate transaction tracker." 
+        title="Personal Ledger" 
+        subtitle="Your secure, isolated transaction tracker." 
         activePage="ledger" 
         handleDataRefresh={handleDataRefresh} 
       />
 
       <div className="space-y-2">
         <div className="flex justify-end items-center gap-2 pt-2 pb-4">
+          
           <Popover>
             <PopoverTrigger asChild>
               <Button variant="outline" size="sm" className="flex items-center space-x-2 h-9 bg-background">
@@ -465,8 +483,7 @@ export default function LedgerPage() {
                   <div className="flex items-center gap-3">
                     <CardTitle className="text-xl">{group.name}</CardTitle>
                     <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center gap-1">
-                      {/* CRITICAL FIX: Hide Edit/Delete Category from Viewers */}
-                      {canEdit && (
+                      {canEdit && group.id !== "uncategorized" && (
                         <>
                           <EditCategoryDialog category={group} onUpdated={handleDataRefresh} />
                           <DeleteCategoryDialog 
@@ -490,7 +507,6 @@ export default function LedgerPage() {
                     <TableHeader>
                       <TableRow className="bg-muted/10 hover:bg-muted/10">
                         <TableHead className="w-[40px] text-center px-2">#</TableHead>
-                        {/* CRITICAL FIX: The previously missing Txn ID Column */}
                         <TableHead className="w-[100px] px-2 text-xs uppercase tracking-wider">Txn ID</TableHead>
                         <TableHead className="px-2">Item Name</TableHead>
                         
@@ -534,13 +550,12 @@ export default function LedgerPage() {
                     </TableHeader>
                     <TableBody>
                       {group.spends.length === 0 ? (
-                        <TableRow><TableCell colSpan={canEdit ? 9 : 8} className="text-center py-6 text-muted-foreground italic px-2">No transactions.</TableCell></TableRow>
+                        <TableRow><TableCell colSpan={canEdit ? 8 : 7} className="text-center py-6 text-muted-foreground italic px-2">No transactions.</TableCell></TableRow>
                       ) : (
                         group.spends.map((item, index) => (
                           <TableRow key={item.id}>
                             <TableCell className="text-center text-muted-foreground px-2">{index + 1}</TableCell>
                             
-                            {/* CRITICAL FIX: Modern rendering for the Txn ID */}
                             <TableCell className="px-2">
                               <div className="text-[10px] text-muted-foreground font-mono bg-muted/50 px-1.5 py-0.5 rounded w-fit border border-muted-foreground/10" title={item.transactionId || item.id}>
                                 {(item.transactionId || item.id).substring(0, 8)}
@@ -560,7 +575,6 @@ export default function LedgerPage() {
                             
                             <TableCell className="text-right px-2">
                               <div className="flex items-center justify-end gap-2 group">
-                                {/* CRITICAL FIX: Hide Edit Total Action */}
                                 {canEdit && (
                                   <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200 shrink-0">
                                     <EditTotalAmountDialog transactionId={item.id} currentTotal={item.totalAmount} amountPaid={item.amountPaid} onUpdated={handleDataRefresh} />
@@ -572,7 +586,6 @@ export default function LedgerPage() {
                             
                             <TableCell className="text-right px-2">
                               <div className="flex items-center justify-end gap-2 group">
-                                {/* CRITICAL FIX: Hide Edit Amount Paid Action */}
                                 {canEdit && (
                                   <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200 shrink-0">
                                     <EditAmountDialog transactionId={item.id} currentAmountPaid={item.amountPaid} totalAmount={item.totalAmount} onUpdated={handleDataRefresh} />
@@ -588,7 +601,6 @@ export default function LedgerPage() {
                             
                             <TableCell className="text-right px-2">
                               <div className="flex items-center justify-end gap-2 group">
-                                {/* CRITICAL FIX: Hide Edit Date Action */}
                                 {canEdit && (
                                   <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200 shrink-0">
                                     <EditPaymentDateDialog transactionId={item.id} currentDate={item.date} onUpdated={handleDataRefresh} />
@@ -600,7 +612,6 @@ export default function LedgerPage() {
                             
                             <TableCell className="text-right cursor-pointer px-2">
                               <div className="flex items-center justify-end gap-2 group">
-                                {/* CRITICAL FIX: Hide Edit Last Date Action */}
                                 {canEdit && (
                                   <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200 shrink-0">
                                     <EditLastDateDialog transactionId={item.id} currentDate={item.lastDateOfPayment} paymentDate={item.date} onUpdated={handleDataRefresh} />
@@ -612,7 +623,6 @@ export default function LedgerPage() {
                               </div>
                             </TableCell>
                             
-                            {/* CRITICAL FIX: Conditionally remove the Delete cell for Viewers */}
                             {canEdit && (
                               <TableCell className="text-right px-2 pl-4">
                                 <DeleteSpendItemDialog transactionId={item.id} itemName={item.itemName} onDeleted={handleDataRefresh} />
