@@ -17,9 +17,13 @@ export function EditTotalAmountDialog({ transactionId, currentTotal, amountPaid,
   const handleSave = async () => {
     if (!spendRepo) return;
     const newAmount = Number(amount);
-    if (isNaN(newAmount) || newAmount < 0) return;
+    if (isNaN(newAmount)) return;
 
-    // Strict math validation: Total cannot be less than what is already paid
+    if (newAmount < 0) {
+      setError("Total amount cannot be negative.");
+      return;
+    }
+
     if (newAmount < amountPaid) {
       setError("Total cannot be less than the amount already paid.");
       return;

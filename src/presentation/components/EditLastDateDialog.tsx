@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 interface EditLastDateDialogProps {
   transactionId: string;
   currentDate: Date | null;
-  paymentDate: Date; // Core transaction date used to enforce chronological logic
+  paymentDate: Date;
   onUpdated: () => void;
 }
 
@@ -31,8 +31,6 @@ export function EditLastDateDialog({ transactionId, currentDate, paymentDate, on
     
     try {
       let parsedDate = null;
-      
-      // Allow users to clear the date by unselecting it in the calendar
       if (date) {
         parsedDate = new Date(date);
         parsedDate.setHours(12, 0, 0, 0);
@@ -60,10 +58,7 @@ export function EditLastDateDialog({ transactionId, currentDate, paymentDate, on
             <label className="text-xs font-medium block mb-2">Expected End Date</label>
             <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
               <PopoverTrigger asChild>
-                <Button 
-                  variant={"outline"} 
-                  className={cn("w-full justify-start text-left font-normal", !date && "text-muted-foreground")}
-                >
+                <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !date && "text-muted-foreground")}>
                   <CalendarIcon className="mr-2 h-4 w-4" />
                   {date ? format(date, "PPP") : <span>Pick a date</span>}
                 </Button>
@@ -72,13 +67,7 @@ export function EditLastDateDialog({ transactionId, currentDate, paymentDate, on
                 <Calendar 
                   mode="single" 
                   selected={date} 
-                  onSelect={(newDate) => { 
-                    setDate(newDate); 
-                    // Only close the calendar if a date was actively selected (not unselected)
-                    if (newDate) {
-                      setIsCalendarOpen(false); 
-                    }
-                  }}
+                  onSelect={(newDate) => { setDate(newDate); if (newDate) setIsCalendarOpen(false); }}
                   disabled={(calendarDate) => {
                     const boundary = new Date(paymentDate);
                     boundary.setHours(0, 0, 0, 0); 
@@ -88,7 +77,10 @@ export function EditLastDateDialog({ transactionId, currentDate, paymentDate, on
               </PopoverContent>
             </Popover>
           </div>
-          <Button onClick={handleSave} className="w-full mt-4" disabled={isSaving}>Update</Button>
+          <div className="flex gap-2 mt-4">
+            <Button variant="outline" onClick={() => setDate(undefined)} className="w-full" disabled={isSaving}>Clear Date</Button>
+            <Button onClick={handleSave} className="w-full" disabled={isSaving}>Update</Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

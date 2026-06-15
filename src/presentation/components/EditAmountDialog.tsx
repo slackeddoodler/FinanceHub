@@ -8,19 +8,22 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Pencil } from "lucide-react";
 
-// CRITICAL FIX: Component now accepts totalAmount as a strict prop
 export function EditAmountDialog({ transactionId, currentAmountPaid, totalAmount, onUpdated }: { transactionId: string, currentAmountPaid: number, totalAmount: number, onUpdated: () => void }) {
   const { spendRepo } = useAppStore();
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState(currentAmountPaid.toString());
-  const [error, setError] = useState(""); // Math validation error state
+  const [error, setError] = useState(""); 
 
   const handleSave = async () => {
     if (!spendRepo) return;
     const newAmount = Number(amount);
-    if (isNaN(newAmount) || newAmount < 0) return;
+    if (isNaN(newAmount)) return;
 
-    // CRITICAL FIX: Math validation
+    if (newAmount < 0) {
+      setError("Amount paid cannot be negative.");
+      return;
+    }
+
     if (newAmount > totalAmount) {
       setError("Amount paid cannot exceed total amount.");
       return;
@@ -46,12 +49,7 @@ export function EditAmountDialog({ transactionId, currentAmountPaid, totalAmount
         <div className="space-y-4 pt-4">
           <div className="space-y-2">
             <label className="text-xs font-medium block mb-3">New Amount (INR)</label>
-            <Input 
-              type="number" 
-              value={amount} 
-              onChange={(e) => { setAmount(e.target.value); setError(""); }} 
-              min="0"
-            />
+            <Input type="number" value={amount} onChange={(e) => { setAmount(e.target.value); setError(""); }} min="0" />
             {error && <p className="text-xs text-destructive font-medium mt-1">{error}</p>}
           </div>
           <Button onClick={handleSave} className="w-full mt-2">Update</Button>

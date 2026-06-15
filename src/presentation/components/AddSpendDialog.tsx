@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { usePathname } from "next/navigation";
 import { useAppStore } from "../store/AppProvider";
 import { Category } from "../../domain/entities/Category";
 import { SpendItem } from "../../domain/entities/SpendItem";
@@ -14,7 +15,6 @@ import { CalendarIcon, ChevronDown, Check } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 
-// Reusable Modern Dropdown
 function ModernSelect({ value, onValueChange, options, placeholder, className }: { value?: string, onValueChange: (val: string) => void, options: {label: string, value: string}[], placeholder: string, className?: string }) {
   const [open, setOpen] = useState(false);
   const selectedLabel = value ? options.find(o => o.value === value)?.label : placeholder;
@@ -49,22 +49,20 @@ function ModernSelect({ value, onValueChange, options, placeholder, className }:
 }
 
 export function AddSpendDialog({ onSpendAdded }: { onSpendAdded: () => void }) {
+  const pathname = usePathname();
   const { spendRepo, categoryRepo } = useAppStore();
   const [open, setOpen] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
 
-  // Form State
   const [categoryId, setCategoryId] = useState<string>("");
   const [itemName, setItemName] = useState("");
   const [description, setDescription] = useState("");
   const [totalAmount, setTotalAmount] = useState("");
   const [amountPaid, setAmountPaid] = useState("");
   
-  // Date State
   const [date, setDate] = useState<Date>(new Date());
   const [lastDateOfPayment, setLastDateOfPayment] = useState<Date | undefined>(undefined);
 
-  // UI State
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [isDuePickerOpen, setIsDuePickerOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -94,6 +92,22 @@ export function AddSpendDialog({ onSpendAdded }: { onSpendAdded: () => void }) {
     
     setIsSaving(true);
     try {
+      // Generate strict scope-based incremental TXN ID
+      const txns = await spendRepo.findByDateRange(new Date("2000-01-01"), new Date("2100-01-01"));
+      const scopePrefix = pathname?.startsWith("/personal") ? "P" : "C";
+      let maxNumber = 0;
+      
+      txns.forEach(t => {
+         const match = (t.transactionId || "").match(new RegExp(`^TXN-${scopePrefix}(\\d+)`));
+         if (match) {
+           const num = parseInt(match[1], 10);
+           if (num > maxNumber) maxNumber = num;
+         }
+      });
+      
+      const nextIncremental = maxNumber + 1;
+      const generatedTxnId = `TXN-${scopePrefix}${nextIncremental}`;
+
       const finalDate = new Date(date);
       finalDate.setHours(12, 0, 0, 0);
       
@@ -113,7 +127,7 @@ export function AddSpendDialog({ onSpendAdded }: { onSpendAdded: () => void }) {
         finalDate,
         null,
         finalDueDate,
-        `TXN-${Date.now()}` // Generate sequential Transaction ID
+        generatedTxnId
       );
 
       await spendRepo.save(newSpend);
@@ -126,7 +140,12 @@ export function AddSpendDialog({ onSpendAdded }: { onSpendAdded: () => void }) {
     }
   };
 
-  const isFormValid = categoryId && itemName.trim() !== "" && totalAmount !== "";
+  const numTotal = Number(totalAmount);
+  const numPaid = Number(amountPaid);
+  const hasNegativeError = (totalAmount !== "" && numTotal < 0) || (amountPaid !== "" && numPaid < 0);
+  const isAmountPaidExceeds = totalAmount !== "" && amountPaid !== "" && numPaid > numTotal;
+
+  const isFormValid = categoryId && itemName.trim() !== "" && totalAmount !== "" && !hasNegativeError && !isAmountPaidExceeds;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -150,7 +169,7 @@ export function AddSpendDialog({ onSpendAdded }: { onSpendAdded: () => void }) {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-4">
             <div className="space-y-2">
               <Label className="text-xs font-medium">Item Name <span className="text-destructive">*</span></Label>
               <Input 
@@ -162,11 +181,11 @@ export function AddSpendDialog({ onSpendAdded }: { onSpendAdded: () => void }) {
             </div>
             <div className="space-y-2">
               <Label className="text-xs font-medium">Description</Label>
-              <Input 
+              <textarea 
                 placeholder="Optional details" 
                 value={description} 
                 onChange={e => setDescription(e.target.value)} 
-                className="h-10"
+                className="flex min-h-[60px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 resize-none custom-scrollbar"
               />
             </div>
           </div>
@@ -179,7 +198,7 @@ export function AddSpendDialog({ onSpendAdded }: { onSpendAdded: () => void }) {
                 placeholder="0.00" 
                 value={totalAmount} 
                 onChange={e => setTotalAmount(e.target.value)} 
-                className="h-10"
+                className={cn("h-10", totalAmount !== "" && numTotal < 0 && "border-destructive")}
               />
             </div>
             <div className="space-y-2">
@@ -189,10 +208,16 @@ export function AddSpendDialog({ onSpendAdded }: { onSpendAdded: () => void }) {
                 placeholder="0.00" 
                 value={amountPaid} 
                 onChange={e => setAmountPaid(e.target.value)} 
-                className="h-10"
+                className={cn("h-10", (amountPaid !== "" && numPaid < 0) || isAmountPaidExceeds ? "border-destructive" : "")}
               />
             </div>
           </div>
+          
+          {(hasNegativeError || isAmountPaidExceeds) && (
+            <div className="text-[10px] text-destructive font-medium leading-none">
+              {hasNegativeError ? "Amounts cannot be negative." : "Amount paid cannot exceed total amount."}
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2 flex flex-col">

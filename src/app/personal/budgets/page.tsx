@@ -15,15 +15,14 @@ import { DashboardSkeleton } from "@/presentation/components/DashboardSkeleton";
 import { LockScreen } from "@/presentation/components/LockScreen";
 import { GlobalHeader } from "@/presentation/components/GlobalHeader";
 import { Save, AlertCircle, CheckCircle2, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 type SortKey = 'allocatedBudget' | 'totalSpent' | 'remaining';
 
 export default function PersonalBudgetsPage() {
   const pathname = usePathname();
-  // CRITICAL FIX: Extracted userRole from the store
   const { isDbReady, isAuthenticated, spendRepo, categoryRepo, userRole } = useAppStore();
   
-  // --- RBAC PERMISSION CHECK ---
   const isPersonal = pathname?.startsWith("/personal");
   const canEdit = isPersonal || userRole === "admin" || userRole === "editor";
   
@@ -49,14 +48,8 @@ export default function PersonalBudgetsPage() {
 
   const requestSort = (key: SortKey) => {
     let direction: 'asc' | 'desc' = 'asc';
-    
-    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
-      direction = 'desc';
-    } else if (sortConfig && sortConfig.key === key && sortConfig.direction === 'desc') {
-      setSortConfig(null);
-      return;
-    }
-    
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
+    else if (sortConfig && sortConfig.key === key && sortConfig.direction === 'desc') { setSortConfig(null); return; }
     setSortConfig({ key, direction });
   };
 
@@ -91,7 +84,6 @@ export default function PersonalBudgetsPage() {
       return mapped.sort((a, b) => {
         const aValue = a[sortConfig.key];
         const bValue = b[sortConfig.key];
-        
         if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
         if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
         return 0;
@@ -104,7 +96,7 @@ export default function PersonalBudgetsPage() {
   const changedCount = budgetMatrix.filter(c => c.hasChanged).length;
 
   const handleSaveSingle = async (categoryId: string, newBudget: number) => {
-    if (!categoryRepo) return;
+    if (!categoryRepo || newBudget < 0) return;
     setIsSaving(true);
     try {
       const useCase = new UpdateCategoryBudgetUseCase(categoryRepo);
@@ -121,7 +113,7 @@ export default function PersonalBudgetsPage() {
     try {
       const useCase = new UpdateCategoryBudgetUseCase(categoryRepo);
       const promises = budgetMatrix
-        .filter(c => c.hasChanged)
+        .filter(c => c.hasChanged && c.draftValue >= 0)
         .map(c => useCase.execute(c.id, c.draftValue));
       await Promise.all(promises);
       handleDataRefresh();
@@ -135,14 +127,7 @@ export default function PersonalBudgetsPage() {
 
   return (
     <main className="min-h-screen bg-background text-foreground p-8 space-y-6 pb-24">
-      
-      {/* GLOBAL HEADER IS INJECTED HERE */}
-      <GlobalHeader 
-        title="Personal Budgets" 
-        subtitle="Manage your private allocations." 
-        activePage="budgets" 
-        handleDataRefresh={handleDataRefresh} 
-      />
+      <GlobalHeader title="Personal Budgets" subtitle="Manage your private allocations." activePage="budgets" handleDataRefresh={handleDataRefresh} />
 
       <Card className="overflow-hidden shadow-sm">
         <CardHeader className="bg-muted/30 border-b">
@@ -154,37 +139,10 @@ export default function PersonalBudgetsPage() {
             <TableHeader>
               <TableRow className="bg-muted/10 hover:bg-muted/10">
                 <TableHead className="w-[200px] px-4 align-middle">Category Name</TableHead>
-                
-                <TableHead className="px-6">
-                  <div className="flex items-center justify-end">
-                    <Button variant="ghost" size="sm" onClick={() => requestSort('allocatedBudget')} className="-mr-3 h-8 font-medium">
-                      Current Budget
-                      {renderSortIcon('allocatedBudget')}
-                    </Button>
-                  </div>
-                </TableHead>
-                
-                <TableHead className="px-6">
-                  <div className="flex items-center justify-end">
-                    <Button variant="ghost" size="sm" onClick={() => requestSort('totalSpent')} className="-mr-3 h-8 font-medium">
-                      Total Spent
-                      {renderSortIcon('totalSpent')}
-                    </Button>
-                  </div>
-                </TableHead>
-                
-                <TableHead className="pl-2 pr-12">
-                  <div className="flex items-center justify-end">
-                    <Button variant="ghost" size="sm" onClick={() => requestSort('remaining')} className="-mr-3 h-8 font-medium">
-                      Remaining / Deficit
-                      {renderSortIcon('remaining')}
-                    </Button>
-                  </div>
-                </TableHead>
-                
+                <TableHead className="px-6"><div className="flex justify-end"><Button variant="ghost" size="sm" onClick={() => requestSort('allocatedBudget')} className="-mr-3 h-8 font-medium">Current Budget{renderSortIcon('allocatedBudget')}</Button></div></TableHead>
+                <TableHead className="px-6"><div className="flex justify-end"><Button variant="ghost" size="sm" onClick={() => requestSort('totalSpent')} className="-mr-3 h-8 font-medium">Total Spent{renderSortIcon('totalSpent')}</Button></div></TableHead>
+                <TableHead className="pl-2 pr-12"><div className="flex justify-end"><Button variant="ghost" size="sm" onClick={() => requestSort('remaining')} className="-mr-3 h-8 font-medium">Remaining / Deficit{renderSortIcon('remaining')}</Button></div></TableHead>
                 <TableHead className="w-[150px] px-6 align-middle">Utilization</TableHead>
-                
-                {/* CRITICAL FIX: Hide the Input and Action headers from Viewers */}
                 {canEdit && <TableHead className="text-right w-[120px] px-6 align-middle">New Budget (₹)</TableHead>}
                 {canEdit && <TableHead className="w-[100px] text-center px-6 align-middle">Actions</TableHead>}
               </TableRow>
@@ -196,14 +154,11 @@ export default function PersonalBudgetsPage() {
                 budgetMatrix.map((cat) => (
                   <TableRow key={cat.id} className={cat.hasChanged ? "bg-primary/5 hover:bg-primary/10 transition-colors" : ""}>
                     <TableCell className="font-medium px-4">{cat.name}</TableCell>
-                    
                     <TableCell className="text-right text-muted-foreground px-6">{formatINR(cat.allocatedBudget)}</TableCell>
                     <TableCell className="text-right font-medium px-6">{formatINR(cat.totalSpent)}</TableCell>
-                    
                     <TableCell className={`text-right font-semibold pl-2 pr-12 ${cat.remaining < 0 ? "text-destructive" : "text-emerald-600 dark:text-emerald-400"}`}>
                       {cat.remaining < 0 ? `-${formatINR(Math.abs(cat.remaining))}` : formatINR(cat.remaining)}
                     </TableCell>
-                    
                     <TableCell className="px-6">
                       <div className="flex flex-col gap-1.5">
                         <div className="flex justify-between text-[10px] font-bold text-muted-foreground">
@@ -211,41 +166,43 @@ export default function PersonalBudgetsPage() {
                           {cat.remaining < 0 && <AlertCircle className="h-3 w-3 text-destructive" />}
                         </div>
                         <div className="w-full h-1.5 bg-secondary rounded-full overflow-hidden">
-                          <div 
-                            className={`h-full rounded-full transition-all duration-500 ${cat.utilization >= 100 ? 'bg-destructive' : cat.utilization >= 80 ? 'bg-amber-500' : 'bg-emerald-500'}`} 
-                            style={{ width: `${Math.min(cat.utilization, 100)}%` }} 
-                          />
+                          <div className={`h-full rounded-full transition-all duration-500 ${cat.utilization >= 100 ? 'bg-destructive' : cat.utilization >= 80 ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${Math.min(cat.utilization, 100)}%` }} />
                         </div>
                       </div>
                     </TableCell>
                     
-                    {/* CRITICAL FIX: Hide the budget inputs from Viewers */}
                     {canEdit && (
                       <TableCell className="px-6">
-                        <Input 
-                          type="number" 
-                          value={cat.draftInput} 
-                          onChange={(e) => setDraftBudgets(prev => ({ ...prev, [cat.id]: e.target.value }))}
-                          className={`h-9 w-24 text-right font-medium ${cat.hasChanged ? "border-primary ring-1 ring-primary/20" : ""}`}
-                        />
+                        <div className="flex flex-col gap-1 items-end">
+                          <Input 
+                            type="number" 
+                            value={cat.draftInput} 
+                            onChange={(e) => setDraftBudgets(prev => ({ ...prev, [cat.id]: e.target.value }))}
+                            className={cn(
+                              "h-9 w-24 text-right font-medium",
+                              cat.hasChanged && "border-primary ring-1 ring-primary/20",
+                              cat.draftValue < 0 && "border-destructive ring-1 ring-destructive focus-visible:ring-destructive"
+                            )}
+                          />
+                          {cat.draftValue < 0 && <span className="text-[10px] text-destructive leading-none font-medium">Must be ≥ 0</span>}
+                        </div>
                       </TableCell>
                     )}
                     
-                    {/* CRITICAL FIX: Hide the individual save buttons from Viewers */}
                     {canEdit && (
                       <TableCell className="px-6 text-center">
-                        {cat.hasChanged && changedCount === 1 && (
+                        {changedCount > 1 && cat.hasChanged ? (
+                          <CheckCircle2 className="h-5 w-5 mx-auto text-primary animate-in fade-in zoom-in-95" />
+                        ) : (
                           <Button 
                             size="sm" 
                             onClick={() => handleSaveSingle(cat.id, cat.draftValue)}
-                            disabled={isSaving}
-                            className="h-8 w-full animate-in fade-in zoom-in-95 duration-200"
+                            disabled={isSaving || !cat.hasChanged || cat.draftValue < 0 || changedCount > 1}
+                            variant={cat.hasChanged ? "default" : "secondary"}
+                            className={cn("h-8 w-full transition-all duration-200", (!cat.hasChanged || changedCount > 1) && "opacity-50 grayscale")}
                           >
                             <Save className="h-3.5 w-3.5 mr-1.5" /> Save
                           </Button>
-                        )}
-                        {cat.hasChanged && changedCount > 1 && (
-                          <CheckCircle2 className="h-5 w-5 mx-auto text-primary animate-in fade-in zoom-in-95" />
                         )}
                       </TableCell>
                     )}
@@ -257,7 +214,6 @@ export default function PersonalBudgetsPage() {
         </CardContent>
       </Card>
 
-      {/* CRITICAL FIX: Only let users with write-access see the global save floating bar */}
       {canEdit && changedCount >= 2 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-10 fade-in duration-300">
           <Card className="shadow-xl border-primary/20 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">

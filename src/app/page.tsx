@@ -301,7 +301,7 @@ export default function PersonalLedgerPage() {
     <main className="min-h-screen bg-background text-foreground p-8 space-y-6">
       
       <GlobalHeader 
-        title="Personal Ledger" 
+        title="Company's Ledger" 
         subtitle="Your secure, isolated transaction tracker." 
         activePage="ledger" 
         handleDataRefresh={handleDataRefresh} 
